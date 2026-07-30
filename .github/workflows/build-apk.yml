@@ -11,6 +11,7 @@ concurrency:
 
 env:
   APK_PATH: android/app/build/outputs/apk/release/app-arm64-v8a-release.apk
+  TZ: Asia/Shanghai
 
 jobs:
   build:
@@ -24,30 +25,53 @@ jobs:
           ref: v0.2
           fetch-tags: true
 
+      - name: Check recent commits (skip if no activity in 12h)
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "schedule" ]; then
+            COMMITS=$(git log --since="12 hours ago" --oneline | wc -l)
+            if [ "$COMMITS" -eq 0 ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "⏭️ 过去 12 小时无新提交，跳过本次编译"
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              echo "✅ 过去 12 小时有 $COMMITS 次提交，继续编译"
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "👆 手动触发，继续编译"
+          fi
+
       - name: Setup pnpm
+        if: steps.check.outputs.skip != 'true'
         uses: pnpm/action-setup@v4
 
       - name: Setup Node.js 22
+        if: steps.check.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
       - name: Setup Java 17
+        if: steps.check.outputs.skip != 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
       - name: Setup Android SDK
+        if: steps.check.outputs.skip != 'true'
         uses: android-actions/setup-android@v3
 
       - name: Install dependencies
+        if: steps.check.outputs.skip != 'true'
         run: |
           pnpm install
           pnpm exec expo --version
 
       - name: Prebuild Android
+        if: steps.check.outputs.skip != 'true'
         run: |
           npx expo prebuild --platform android --clean
         env:
@@ -55,6 +79,7 @@ jobs:
           EXPO_ANDROID_KEY_PASSWORD: ""
 
       - name: Configure signing, R8 & proguard
+        if: steps.check.outputs.skip != 'true'
         run: |
           # 解码签名文件
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/keystore.jks
@@ -97,6 +122,7 @@ print('✅ build.gradle 已更新')
 PYEOF
 
       - name: Create proguard-rules.pro
+        if: steps.check.outputs.skip != 'true'
         run: |
           cat > android/app/proguard-rules.pro << 'EOF'
 # React Native
@@ -127,6 +153,7 @@ EOF
           echo "✅ proguard-rules.pro 已创建"
 
       - name: Build ARM64-v8a Release APK
+        if: steps.check.outputs.skip != 'true'
         run: |
           cd android
           export KEYSTORE_PASSWORD="${{ secrets.KEYSTORE_PASSWORD }}"
@@ -134,15 +161,17 @@ EOF
           export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
           ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
 
-      - name: Generate release tag
+      - name: Generate release tag (Beijing time)
+        if: steps.check.outputs.skip != 'true'
         id: tag
         run: |
-          TIMESTAMP=$(date -u +'%Y%m%d-%H%M%S')
+          TIMESTAMP=$(TZ='Asia/Shanghai' date +'%Y%m%d-%H%M%S')
           TAG="build-${TIMESTAMP}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "✅ Release tag: ${TAG}"
+          echo "✅ Release tag (北京): ${TAG}"
 
       - name: Create tag
+        if: steps.check.outputs.skip != 'true'
         run: |
           git config user.name "default"
           git config user.email "agent@qwenpaw.ai"
@@ -150,6 +179,7 @@ EOF
           git push origin "${{ steps.tag.outputs.tag }}"
 
       - name: Create Release & Upload APK
+        if: steps.check.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
@@ -159,7 +189,7 @@ EOF
 
             | 项目 | 值 |
             |------|-----|
-            | 📅 编译时间 | `${{ steps.tag.outputs.tag }}` |
+            | 📅 编译时间（北京） | `${{ steps.tag.outputs.tag }}` |
             | 🏗 架构 | `arm64-v8a` |
             | ⚡ R8 混淆 | ✅ 已开启 |
             | 🔑 签名 | 自定义密钥签名 |
@@ -174,6 +204,7 @@ EOF
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload APK (artifact backup)
+        if: steps.check.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: cherry-studio-arm64-v8a-release
