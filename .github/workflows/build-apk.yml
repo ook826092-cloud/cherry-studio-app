@@ -64,6 +64,17 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - if: steps.check.outputs.skip != 'true'
+        name: 缓存 Gradle 依赖（加速编译）
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-
+
+      - if: steps.check.outputs.skip != 'true'
         name: 安装依赖 + 生成安卓原生代码
         run: |
           pnpm install
