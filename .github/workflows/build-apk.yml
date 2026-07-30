@@ -9,9 +9,6 @@ concurrency:
   group: build-apk
   cancel-in-progress: true
 
-env:
-  APK_PATH: android/app/build/outputs/apk/release/app-arm64-v8a-release.apk
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -105,13 +102,20 @@ jobs:
           export SIGNING_KEY_PASSWORD="${{ secrets.SIGNING_KEY_PASSWORD }}"
           ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
 
-      # ⚠️ 以下两步谁先炸都不影响 APK 已被安全保存
+      - if: steps.check.outputs.skip != 'true'
+        name: 查找编译出的 APK
+        id: find-apk
+        run: |
+          APK=$(find android/app/build/outputs -name "*.apk" | head -1)
+          echo "找到 APK: $APK"
+          echo "apk-path=$APK" >> "$GITHUB_OUTPUT"
+
       - if: steps.check.outputs.skip != 'true'
         name: 🚨 立即备份 APK 到 Actions 工件（防丢）
         uses: actions/upload-artifact@v4
         with:
           name: cherry-studio-arm64-v8a-release
-          path: ${{ env.APK_PATH }}
+          path: ${{ steps.find-apk.outputs.apk-path }}
           retention-days: 7
 
       - if: steps.check.outputs.skip != 'true'
@@ -137,7 +141,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Cherry Studio ${{ steps.tag.outputs.tag }}
           body: Cherry Studio ARM64-v8a Release APK
-          files: ${{ env.APK_PATH }}
+          files: ${{ steps.find-apk.outputs.apk-path }}
           draft: false
           prerelease: true
         env:
