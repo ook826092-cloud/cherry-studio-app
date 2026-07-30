@@ -1,0 +1,118 @@
+name: Build APK ARM64 v8a Release
+
+on:
+  schedule:
+    - cron: '10 16,4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+env:
+  APK_PATH: android/app/build/outputs/apk/release/app-arm64-v8a-release.apk
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.2
+          fetch-tags: true
+
+      - name: Check recent commits
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "schedule" ]; then
+            COMMITS=$(git log --since="12 hours ago" --oneline | wc -l)
+            if [ "$COMMITS" -eq 0 ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "No commits in 12h, skip"
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              echo "$COMMITS commits found, build"
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Manual trigger"
+          fi
+
+      - if: steps.check.outputs.skip != 'true'
+        uses: pnpm/action-setup@v4
+
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - if: steps.check.outputs.skip != 'true'
+        uses: android-actions/setup-android@v3
+
+      - if: steps.check.outputs.skip != 'true'
+        run: |
+          pnpm install
+          npx expo prebuild --platform android --clean
+        env:
+          EXPO_ANDROID_KEYSTORE_PASSWORD: ""
+          EXPO_ANDROID_KEY_PASSWORD: ""
+
+      - if: steps.check.outputs.skip != 'true'
+        run: python3 scripts/fix_build_gradle.py
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+
+      - if: steps.check.outputs.skip != 'true'
+        run: python3 scripts/write_proguard.py
+
+      - if: steps.check.outputs.skip != 'true'
+        run: |
+          cd android
+          export SIGNING_STORE_PASSWORD="${{ secrets.SIGNING_STORE_PASSWORD }}"
+          export SIGNING_KEY_ALIAS="${{ secrets.SIGNING_KEY_ALIAS }}"
+          export SIGNING_KEY_PASSWORD="${{ secrets.SIGNING_KEY_PASSWORD }}"
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
+
+      - if: steps.check.outputs.skip != 'true'
+        id: tag
+        run: |
+          TAG="build-$(TZ=Asia/Shanghai date +%Y%m%d-%H%M%S)"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - if: steps.check.outputs.skip != 'true'
+        run: |
+          git config user.name "default"
+          git config user.email "agent@qwenpaw.ai"
+          git tag "${{ steps.tag.outputs.tag }}"
+          git push origin "${{ steps.tag.outputs.tag }}"
+
+      - if: steps.check.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Cherry Studio ${{ steps.tag.outputs.tag }}
+          body: Cherry Studio ARM64-v8a Release APK
+          files: ${{ env.APK_PATH }}
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cherry-studio-arm64-v8a-release
+          path: ${{ env.APK_PATH }}
+          retention-days: 7
