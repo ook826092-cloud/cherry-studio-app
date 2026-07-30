@@ -106,12 +106,12 @@ jobs:
         name: 查找编译出的 APK
         id: find-apk
         run: |
-          APK=$(find android/app/build/outputs -name "*.apk" | head -1)
+          APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -1)
           echo "找到 APK: $APK"
           echo "apk-path=$APK" >> "$GITHUB_OUTPUT"
 
       - if: steps.check.outputs.skip != 'true'
-        name: 🚨 立即备份 APK 到 Actions 工件（防丢）
+        name: 立即备份 APK 到 Actions 工件（防丢）
         uses: actions/upload-artifact@v4
         with:
           name: cherry-studio-arm64-v8a-release
@@ -119,30 +119,26 @@ jobs:
           retention-days: 7
 
       - if: steps.check.outputs.skip != 'true'
-        name: 生成 Release 标签
+        name: 生成 Release 标签名
         id: tag
         run: |
           TAG="build-$(TZ=Asia/Shanghai date +%Y%m%d-%H%M%S)"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "🏷️ 标签: ${TAG}"
+          echo "标签: ${TAG}"
 
       - if: steps.check.outputs.skip != 'true'
-        name: 推送标签到仓库
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "${{ steps.tag.outputs.tag }}"
-          git push origin "${{ steps.tag.outputs.tag }}"
-
-      - if: steps.check.outputs.skip != 'true'
-        name: 创建 Release + 上传 APK 到 Release
+        name: 创建 Release + 上传 APK（自动创建 tag）
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Cherry Studio ${{ steps.tag.outputs.tag }}
-          body: Cherry Studio ARM64-v8a Release APK
+          body: |
+            Cherry Studio ARM64-v8a Release APK
+            架构: arm64-v8a | R8混淆: 开启 | 签名: 自定义密钥
+            自动编译于 GitHub Actions
           files: ${{ steps.find-apk.outputs.apk-path }}
           draft: false
           prerelease: true
+          make_latest: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
