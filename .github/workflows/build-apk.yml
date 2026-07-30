@@ -124,16 +124,14 @@ jobs:
 
       - if: steps.check.outputs.skip != 'true'
         name: 推送标签到仓库
-        continue-on-error: true
         run: |
-          git config user.name "default"
-          git config user.email "agent@qwenpaw.ai"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${{ steps.tag.outputs.tag }}"
           git push origin "${{ steps.tag.outputs.tag }}"
 
       - if: steps.check.outputs.skip != 'true'
         name: 创建 Release + 上传 APK 到 Release
-        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
