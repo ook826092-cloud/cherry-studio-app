@@ -1,4 +1,4 @@
-name: Build APK (ARM64-v8a Release)
+name: Build APK ARM64 v8a Release
 
 on:
   schedule:
@@ -25,21 +25,21 @@ jobs:
           ref: v0.2
           fetch-tags: true
 
-      - name: Check recent commits (skip if no activity in 12h)
+      - name: Check recent commits
         id: check
         run: |
           if [ "${{ github.event_name }}" == "schedule" ]; then
             COMMITS=$(git log --since="12 hours ago" --oneline | wc -l)
             if [ "$COMMITS" -eq 0 ]; then
               echo "skip=true" >> "$GITHUB_OUTPUT"
-              echo "⏭️ 过去 12 小时无新提交，跳过本次编译"
+              echo "No commits in 12h, skip"
             else
               echo "skip=false" >> "$GITHUB_OUTPUT"
-              echo "✅ 过去 12 小时有 $COMMITS 次提交，继续编译"
+              echo "Found $COMMITS commits, building"
             fi
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "👆 手动触发，继续编译"
+            echo "Manual trigger, building"
           fi
 
       - name: Setup pnpm
@@ -78,20 +78,15 @@ jobs:
           EXPO_ANDROID_KEYSTORE_PASSWORD: ""
           EXPO_ANDROID_KEY_PASSWORD: ""
 
-      - name: Configure signing, R8 & proguard
+      - name: Configure signing and R8
         if: steps.check.outputs.skip != 'true'
         run: |
-          # 解码签名文件
           echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > android/app/keystore.jks
-
-          # 用 Python 注入签名配置和 R8 到 build.gradle
-          python3 << 'PYEOF'
+          python3 << 'HEREDOC'
 import re
-
 with open('android/app/build.gradle', 'r') as f:
-    content = f.read()
-
-signing_block = '''
+    c = f.read()
+sb = '''
     signingConfigs {
         release {
             storeFile file('keystore.jks')
@@ -101,56 +96,31 @@ signing_block = '''
         }
     }
 '''
-
-content = re.sub(
-    r'(android\s*\{)',
-    r'\1' + signing_block,
-    content
-)
-
-content = re.sub(
-    r'(buildTypes\s*\{.*?release\s*\{)',
-    r'\1\n            minifyEnabled true\n            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"\n            signingConfig signingConfigs.release',
-    content,
-    flags=re.DOTALL
-)
-
+c = re.sub(r'(android\s*\{)', r'\1' + sb, c)
+c = re.sub(r'(buildTypes\s*\{.*?release\s*\{)', r'\1\n            minifyEnabled true\n            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"\n            signingConfig signingConfigs.release', c, flags=re.DOTALL)
 with open('android/app/build.gradle', 'w') as f:
-    f.write(content)
-
-print('✅ build.gradle 已更新')
-PYEOF
+    f.write(c)
+print('build.gradle updated')
+HEREDOC
 
       - name: Create proguard-rules.pro
         if: steps.check.outputs.skip != 'true'
         run: |
-          cat > android/app/proguard-rules.pro << 'EOF'
-# React Native
+          cat > android/app/proguard-rules.pro << 'HEREDOC'
 -keep class com.facebook.react.** { *; }
 -keep class com.facebook.hermes.** { *; }
 -keep class com.facebook.jni.** { *; }
-
-# Expo
 -keep class expo.** { *; }
-
-# Hermes
 -keep class com.facebook.hermes.unicode.** { *; }
-
-# Keep annotations for native modules
 -keepattributes *Annotation*
 -keepclassmembers class * {
     @com.facebook.react.uimanager.annotations.ReactProp <methods>;
     @com.facebook.react.uimanager.annotations.ReactPropGroup <methods>;
 }
-
-# Keep native modules & packages
 -keep class * extends com.facebook.react.ReactPackage { *; }
-
-# Keep JavaScript engine interfaces
 -dontwarn com.facebook.hermes.**
 -dontwarn com.facebook.jni.**
-EOF
-          echo "✅ proguard-rules.pro 已创建"
+HEREDOC
 
       - name: Build ARM64-v8a Release APK
         if: steps.check.outputs.skip != 'true'
@@ -161,14 +131,12 @@ EOF
           export SIGNING_KEY_PASSWORD="${{ secrets.SIGNING_KEY_PASSWORD }}"
           ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
 
-      - name: Generate release tag (Beijing time)
+      - name: Generate release tag
         if: steps.check.outputs.skip != 'true'
         id: tag
         run: |
-          TIMESTAMP=$(TZ='Asia/Shanghai' date +'%Y%m%d-%H%M%S')
-          TAG="build-${TIMESTAMP}"
+          TAG="build-$(TZ='Asia/Shanghai' date +'%Y%m%d-%H%M%S')"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "✅ Release tag (北京时间): ${TAG}"
 
       - name: Create tag
         if: steps.check.outputs.skip != 'true'
@@ -178,32 +146,28 @@ EOF
           git tag "${{ steps.tag.outputs.tag }}"
           git push origin "${{ steps.tag.outputs.tag }}"
 
-      - name: Create Release & Upload APK
+      - name: Create Release
         if: steps.check.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Cherry Studio ${{ steps.tag.outputs.tag }}
           body: |
-            ## Cherry Studio — ARM64-v8a Release APK
+            Cherry Studio ARM64-v8a Release APK
 
-            | 项目 | 值 |
-            |------|-----|
-            | 📅 编译时间（北京时间） | `${{ steps.tag.outputs.tag }}` |
-            | 🏗 架构 | `arm64-v8a` |
-            | ⚡ R8 混淆 | ✅ 已开启 |
-            | 🔑 签名 | 自定义密钥签名 |
+            Build: ${{ steps.tag.outputs.tag }}
+            Arch: arm64-v8a
+            R8: enabled
+            Sign: custom keystore
 
-            ---
-            *🤖 自动编译于 GitHub Actions*
-          files: |
-            ${{ env.APK_PATH }}
+            Auto-built by GitHub Actions
+          files: ${{ env.APK_PATH }}
           draft: false
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload APK (artifact backup)
+      - name: Upload APK artifact
         if: steps.check.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
