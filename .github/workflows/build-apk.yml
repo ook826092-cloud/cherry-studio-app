@@ -106,36 +106,7 @@ jobs:
           ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
 
       - if: steps.check.outputs.skip != 'true'
-        name: 生成 Release 标签
-        id: tag
-        run: |
-          TAG="build-$(TZ=Asia/Shanghai date +%Y%m%d-%H%M%S)"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "🏷️ 标签: ${TAG}"
-
-      - if: steps.check.outputs.skip != 'true'
-        name: 推送标签到仓库
-        run: |
-          git config user.name "default"
-          git config user.email "agent@qwenpaw.ai"
-          git tag "${{ steps.tag.outputs.tag }}"
-          git push origin "${{ steps.tag.outputs.tag }}"
-
-      - if: steps.check.outputs.skip != 'true'
-        name: 创建 Release 页面 + 上传 APK
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: Cherry Studio ${{ steps.tag.outputs.tag }}
-          body: Cherry Studio ARM64-v8a Release APK
-          files: ${{ env.APK_PATH }}
-          draft: false
-          prerelease: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - if: steps.check.outputs.skip != 'true'
-        name: 备份 APK 到 Actions 工件
+        name: 上传 APK 到 Actions 工件
         uses: actions/upload-artifact@v4
         with:
           name: cherry-studio-arm64-v8a-release
