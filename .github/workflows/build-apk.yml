@@ -82,7 +82,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: |
           # 解码签名文件
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/keystore.jks
+          echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > android/app/keystore.jks
 
           # 用 Python 注入签名配置和 R8 到 build.gradle
           python3 << 'PYEOF'
@@ -95,9 +95,9 @@ signing_block = '''
     signingConfigs {
         release {
             storeFile file('keystore.jks')
-            storePassword System.getenv('KEYSTORE_PASSWORD')
-            keyAlias System.getenv('KEY_ALIAS')
-            keyPassword System.getenv('KEY_PASSWORD')
+            storePassword System.getenv('SIGNING_STORE_PASSWORD')
+            keyAlias System.getenv('SIGNING_KEY_ALIAS')
+            keyPassword System.getenv('SIGNING_KEY_PASSWORD')
         }
     }
 '''
@@ -156,9 +156,9 @@ EOF
         if: steps.check.outputs.skip != 'true'
         run: |
           cd android
-          export KEYSTORE_PASSWORD="${{ secrets.KEYSTORE_PASSWORD }}"
-          export KEY_ALIAS="${{ secrets.KEY_ALIAS }}"
-          export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+          export SIGNING_STORE_PASSWORD="${{ secrets.SIGNING_STORE_PASSWORD }}"
+          export SIGNING_KEY_ALIAS="${{ secrets.SIGNING_KEY_ALIAS }}"
+          export SIGNING_KEY_PASSWORD="${{ secrets.SIGNING_KEY_PASSWORD }}"
           ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
 
       - name: Generate release tag (Beijing time)
@@ -168,7 +168,7 @@ EOF
           TIMESTAMP=$(TZ='Asia/Shanghai' date +'%Y%m%d-%H%M%S')
           TAG="build-${TIMESTAMP}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "✅ Release tag (北京): ${TAG}"
+          echo "✅ Release tag (北京时间): ${TAG}"
 
       - name: Create tag
         if: steps.check.outputs.skip != 'true'
@@ -189,7 +189,7 @@ EOF
 
             | 项目 | 值 |
             |------|-----|
-            | 📅 编译时间（北京） | `${{ steps.tag.outputs.tag }}` |
+            | 📅 编译时间（北京时间） | `${{ steps.tag.outputs.tag }}` |
             | 🏗 架构 | `arm64-v8a` |
             | ⚡ R8 混淆 | ✅ 已开启 |
             | 🔑 签名 | 自定义密钥签名 |
