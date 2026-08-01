@@ -6,16 +6,20 @@ import {
 import { withLayoutContext } from 'expo-router';
 import type { ParamListBase, TabNavigationState } from 'expo-router/react-navigation';
 import { useNavigationState } from 'expo-router/react-navigation';
-import { useThemeColor } from 'heroui-native/hooks';
 import { useTranslation } from 'react-i18next';
-import { BottomTabBarVisibilityProvider, useBottomTabBarHidden } from '@/components/navigation';
-import { selectIsNestedTabScreen } from '@/components/navigation/tabBarVisibility';
-import { isAndroid } from '@/config/constants';
+
+import {
+  BottomTabBarVisibilityProvider,
+  useBottomTabBarHidden,
+} from '@/frontend/components/navigation';
+import { selectIsNestedTabScreen } from '@/frontend/components/navigation/tabBarVisibility';
 import {
   SearchScopeProvider,
   useSetSearchScope,
-} from '@/screens/GlobalSearchScreen/context/SearchScopeProvider';
-import { getSearchScopeForTabRoute } from '@/screens/GlobalSearchScreen/utils/searchScope';
+} from '@/frontend/features/search/context/SearchScopeProvider';
+import { getSearchScopeForTabRoute } from '@/frontend/features/search/utils/searchScope';
+import { useThemeColor } from '@/frontend/hooks/useThemeColor';
+import { isAndroid } from '@/frontend/utils/constants';
 
 const BottomTabNavigator = createNativeBottomTabNavigator().Navigator;
 
@@ -70,7 +74,7 @@ export default function TabLayout() {
 
 function TabNavigator() {
   const { t } = useTranslation();
-  const accentColor = useThemeColor('accent');
+  const primaryColor = useThemeColor('primary');
   const [tabBarColor] = useThemeColor(['background-secondary']);
   const isBottomTabBarHidden = useBottomTabBarHidden();
   const isNestedScreen = useNavigationState(selectIsNestedTabScreen);
@@ -93,7 +97,7 @@ function TabNavigator() {
         sceneStyle,
         // freezeOnBlur 会让冻结中的 tab 错过 uniwind 的免重渲染主题 patch，
         // 解冻后也不补发，导致切主题后整页停留旧主题（见 .context/theme-debug）。
-        tabBarActiveTintColor: accentColor,
+        tabBarActiveTintColor: primaryColor,
       }}
     >
       <Tabs.Screen

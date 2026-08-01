@@ -1,7 +1,7 @@
 import { Stack } from 'expo-router';
-import { useThemeColor } from 'heroui-native/hooks';
 
-import { isIOS, isLiquidGlassAvailable } from '@/config/constants';
+import { useThemeColor } from '@/frontend/hooks/useThemeColor';
+import { isIOS, isLiquidGlassAvailable } from '@/frontend/utils/constants';
 
 export default function AssistantsStackLayout() {
   const foregroundColor = useThemeColor('foreground');

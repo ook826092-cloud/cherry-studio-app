@@ -1,0 +1,86 @@
+/* biome-ignore-all lint/suspicious/noDuplicateCustomProperties: Light and dark theme variants intentionally redefine the same design tokens. */
+
+@import 'tailwindcss';
+@import 'uniwind';
+
+@import 'heroui-native/styles';
+@import '@cherrystudio/design-tokens/native.css';
+
+@source "..";
+@source "../../../packages/lucide-uniwind/src";
+@source "../../../packages/ui/src";
+@source "../../../node_modules/heroui-native/lib";
+
+@theme static {
+  --color-settings-grouped-surface: var(--settings-grouped-surface);
+
+  /* HeroUI 1.x calls its brand role `accent` and its secondary text role `muted`. */
+  --color-accent: var(--primary);
+  --color-accent-foreground: var(--primary-foreground);
+  --color-accent-hover: color-mix(in oklab, var(--primary) 90%, var(--primary-foreground) 10%);
+  --color-accent-soft: color-mix(in oklab, var(--primary) 15%, transparent);
+  --color-accent-soft-foreground: color-mix(in oklab, var(--primary) 80%, var(--foreground) 20%);
+  --color-accent-soft-hover: color-mix(in oklab, var(--primary) 20%, transparent);
+  --color-muted: var(--muted-foreground);
+}
+
+/* HeroUI's structural roles remain host-owned; brand and content roles use the shared contract. */
+@layer theme {
+  :root {
+    @variant light {
+      --surface: var(--card);
+      --surface-foreground: var(--card-foreground);
+      --surface-secondary: var(--muted);
+      --surface-secondary-foreground: var(--muted-foreground);
+      --surface-tertiary: var(--accent);
+      --surface-tertiary-foreground: var(--accent-foreground);
+      --overlay: var(--popover);
+      --overlay-foreground: var(--popover-foreground);
+      --backdrop: oklch(0 0 0 / 20%);
+      --default: var(--secondary);
+      --default-foreground: var(--secondary-foreground);
+      --field-background: var(--card);
+      --field-foreground: var(--foreground);
+      --field-placeholder: var(--muted-foreground);
+      --field-border: var(--input);
+      --segment: var(--card);
+      --segment-foreground: var(--card-foreground);
+      --danger: var(--destructive);
+      --danger-foreground: var(--destructive-foreground);
+      --success-foreground: var(--cs-black);
+      --warning-foreground: var(--cs-black);
+      --separator: var(--border-strong);
+      --focus: var(--ring);
+      --settings-grouped-surface: oklch(0 0 0 / 0.05);
+    }
+
+    @variant dark {
+      /* Electron uses translucency here; native screens require an opaque base. */
+      --cs-background: oklch(0.187 0 0);
+      --surface: var(--card);
+      --surface-foreground: var(--card-foreground);
+      --surface-secondary: var(--muted);
+      --surface-secondary-foreground: var(--muted-foreground);
+      --surface-tertiary: var(--accent);
+      --surface-tertiary-foreground: var(--accent-foreground);
+      --overlay: var(--popover);
+      --overlay-foreground: var(--popover-foreground);
+      --backdrop: oklch(0 0 0 / 20%);
+      --default: var(--secondary);
+      --default-foreground: var(--secondary-foreground);
+      --field-background: var(--card);
+      --field-foreground: var(--foreground);
+      --field-placeholder: var(--muted-foreground);
+      --field-border: var(--input);
+      --segment: var(--secondary);
+      --segment-foreground: var(--secondary-foreground);
+      --danger: var(--destructive);
+      --danger-foreground: var(--destructive-foreground);
+      --success-foreground: var(--cs-black);
+      --warning-foreground: var(--cs-black);
+      --separator: var(--border-strong);
+      --focus: var(--ring);
+      --settings-grouped-surface: oklch(1 0 0 / 0.05);
+    }
+  }
+}

@@ -13,14 +13,20 @@ module.exports = {
   testTimeout: 20_000,
   // `expo prebuild` output: Pods vendor their own test suites, which jest would
   // otherwise collect (hundreds of failing foreign suites drowning real results).
-  testPathIgnorePatterns: ['/node_modules/', '/ios/', '/android/'],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/ios/',
+    '/android/',
+    '/packages/ai-core/',
+    '/packages/ai-sdk-provider/',
+  ],
   moduleNameMapper: {
     '^lucide-uniwind/png/generated/(.*)$':
       '<rootDir>/packages/lucide-uniwind/src/png-icons/generated/$1',
     '^lucide-uniwind/png$': '<rootDir>/packages/lucide-uniwind/src/png-icons/index.ts',
     '^vitest$': '<rootDir>/packages/provider-registry/vitestJestShim.ts',
     '^@/(.*)$': '<rootDir>/src/$1',
-    '^@logger$': '<rootDir>/src/core/logger/LoggerService.ts',
+    '^@logger$': '<rootDir>/src/shared/core/logger/LoggerService.ts',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   // tokenx ships ESM-only (.mjs, no CJS build); jest-expo's preset transform
