@@ -28,52 +28,49 @@ c = re.sub(r'(buildTypes\s*\{.*?release\s*\{)',
 with open('android/app/build.gradle', 'w') as f:
     f.write(c)
 
-# 3. 移除 react-native-nitro-healthkit 的安卓构建
-#    （这是 iOS-only 模块，它的 C++ 代码在安卓上编译不过）
+# 3. 保留 react-native-nitro-healthkit，使用上游 patch 修复后的版本
+#    （上游已在 patches/react-native-nitro-healthkit@1.0.0.patch 修复 Android 构建）
+#    如果后续编译仍报错，可临时恢复下方排除逻辑
 
-# 3a. 从 settings.gradle 移除
-sg_path = 'android/settings.gradle'
-if os.path.exists(sg_path):
-    with open(sg_path, 'r') as f:
-        sg = f.read()
-    old_sg = sg
-    sg = re.sub(r'\n\s*include\s+[:\'"]react-native-nitro-healthkit[\'"]?.*', '', sg)
-    sg = re.sub(r'\n\s*project\([:\'"]react-native-nitro-healthkit[\'"]?\).*?(?:\n|$)', '', sg)
-    # 也清理 projectDir 设置行
-    sg = re.sub(r'\n\s*.*nitro-healthkit.*projectDir.*', '', sg)
-    sg = re.sub(r'\n{2,}', '\n\n', sg)
-    if sg != old_sg:
-        with open(sg_path, 'w') as f:
-            f.write(sg)
-        print('✅ 已从 settings.gradle 移除 nitro-healthkit')
+# 3a. 从 settings.gradle 移除（已注释）
+# sg_path = 'android/settings.gradle'
+# if os.path.exists(sg_path):
+#     with open(sg_path, 'r') as f:
+#         sg = f.read()
+#     old_sg = sg
+#     sg = re.sub(r'\n\s*include\s+[:\'"]react-native-nitro-healthkit[\'"]?.*', '', sg)
+#     sg = re.sub(r'\n\s*project\([:\'"]react-native-nitro-healthkit[\'"]?\).*?(?:\n|$)', '', sg)
+#     sg = re.sub(r'\n\s*.*nitro-healthkit.*projectDir.*', '', sg)
+#     sg = re.sub(r'\n{2,}', '\n\n', sg)
+#     if sg != old_sg:
+#         with open(sg_path, 'w') as f:
+#             f.write(sg)
+#         print('✅ 已从 settings.gradle 移除 nitro-healthkit')
 
-# 3b. 从 app/build.gradle 移除依赖
-with open('android/app/build.gradle', 'r') as f:
-    abg = f.read()
-old_abg = abg
-abg = re.sub(r'\n\s*implementation\s+project\([:\'"]react-native-nitro-healthkit[\'"]?\)', '', abg)
-# 也移除 api/implementation 的其它引用
-abg = re.sub(r'\n.*nitro-healthkit.*', '', abg)
-abg = re.sub(r'\n{2,}', '\n\n', abg)
-if abg != old_abg:
-    with open('android/app/build.gradle', 'w') as f:
-        f.write(abg)
-    print('✅ 已从 app/build.gradle 移除 nitro-healthkit 依赖')
+# 3b. 从 app/build.gradle 移除依赖（已注释）
+# with open('android/app/build.gradle', 'r') as f:
+#     abg = f.read()
+# old_abg = abg
+# abg = re.sub(r'\n\s*implementation\s+project\([:\'"]react-native-nitro-healthkit[\'"]?\)', '', abg)
+# abg = re.sub(r'\n.*nitro-healthkit.*', '', abg)
+# abg = re.sub(r'\n{2,}', '\n\n', abg)
+# if abg != old_abg:
+#     with open('android/app/build.gradle', 'w') as f:
+#         f.write(abg)
+#     print('✅ 已从 app/build.gradle 移除 nitro-healthkit 依赖')
 
-# 3c. 移除 node_modules 中的安卓原生代码（防止 CMake 编译）
-import shutil
-target = os.path.join('node_modules', 'react-native-nitro-healthkit', 'android', 'build.gradle')
-if os.path.exists(target):
-    os.remove(target)
-    print('✅ 已移除 nitro-healthkit/android/build.gradle')
-# 也重命名 android 目录，彻底阻止 CMake
-target_dir = 'node_modules/react-native-nitro-healthkit/android'
-if os.path.exists(target_dir):
-    bak = target_dir + '_disabled'
-    if os.path.exists(bak):
-        import shutil as sh
-        sh.rmtree(bak)
-    os.rename(target_dir, bak)
-    print(f'✅ 已重命名 {target_dir} → android_disabled')
+# 3c. 移除 node_modules 中的安卓原生代码（已注释）
+# target = os.path.join('node_modules', 'react-native-nitro-healthkit', 'android', 'build.gradle')
+# if os.path.exists(target):
+#     os.remove(target)
+#     print('✅ 已移除 nitro-healthkit/android/build.gradle')
+# target_dir = 'node_modules/react-native-nitro-healthkit/android'
+# if os.path.exists(target_dir):
+#     bak = target_dir + '_disabled'
+#     if os.path.exists(bak):
+#         import shutil as sh
+#         sh.rmtree(bak)
+#     os.rename(target_dir, bak)
+#     print(f'✅ 已重命名 {target_dir} → android_disabled')
 
 print('✅ 所有构建配置已完成')
