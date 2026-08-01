@@ -47,8 +47,11 @@ jobs:
         run: |
           git config --global user.name "${{ env.GIT_AUTHOR_NAME }}"
           git config --global user.email "${{ env.GIT_AUTHOR_EMAIL }}"
-          git merge upstream/v0.2 --no-edit
-          # 恢复本地工作流文件，防止上游覆盖
+          # 先暂存本地工作流文件
           git checkout HEAD -- .github/workflows/
+          # 合并上游，接受所有变更
+          git merge upstream/v0.2 --no-edit
+          # 恢复本地工作流文件，排除上游覆盖
+          git checkout HEAD~1 -- .github/workflows/
           git commit --amend --no-edit
           git push origin v0.2
