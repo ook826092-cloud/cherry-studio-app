@@ -72,9 +72,10 @@ jobs:
             gradle-
 
       - if: steps.check.outputs.skip != 'true'
-        name: 安装依赖 + 生成安卓原生代码
+        name: 安装依赖 + 构建工作区包 + 生成安卓原生代码
         run: |
           pnpm install
+          pnpm packages:build
           npx expo prebuild --platform android --clean
         env:
           EXPO_ANDROID_KEYSTORE_PASSWORD: ""
