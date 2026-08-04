@@ -5,7 +5,6 @@ import {
   CloudIcon,
   DatabaseIcon,
   EarthIcon,
-  GlobeIcon,
   InfoIcon,
   ShieldCheckIcon,
   SparklesIcon,
@@ -19,12 +18,10 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUniwind } from 'uniwind';
 
+import { Section, SectionIcon, SectionImage } from '@/frontend/components/Section';
 import { usePreference } from '@/frontend/data/hooks';
 
-import { SettingSelect } from './components/SettingSelect';
-import { SettingsSection } from './components/SettingsSection';
 import { usePrefetchProviders } from './hooks/usePrefetchProviders';
-import { useSettingPreferences } from './hooks/useSettingPreferences';
 import { ProfileHero, ProfileStickyBar, useProfileHeaderAnimation } from './profileHero';
 
 export default function SettingsScreen() {
@@ -34,7 +31,6 @@ export default function SettingsScreen() {
   const { theme } = useUniwind();
   const tabBarHeight = useBottomTabBarHeight();
   const [userName] = usePreference('app.user.name');
-  const settingPreferences = useSettingPreferences();
   const prefetchProviders = usePrefetchProviders();
   const { lockProgress, onScroll, scrollY, toggleHeroLock } = useProfileHeaderAnimation();
   const mcpIcon = resolveProviderIcon('mcp')?.[theme === 'dark' ? 'dark' : 'light'];
@@ -71,90 +67,71 @@ export default function SettingsScreen() {
           userName={userName}
         />
         <View className="gap-6 px-2 pt-6">
-          <SettingsSection
+          <Section
             items={[
               {
-                icon: CircleUserRoundIcon,
+                leading: <SectionIcon icon={CircleUserRoundIcon} />,
                 title: t('settings.items.profile'),
                 onPress: openProfileSettings,
               },
             ]}
           />
-          <SettingsSection
+          <Section
             items={[
               {
-                icon: CloudIcon,
+                leading: <SectionIcon icon={CloudIcon} />,
                 title: t('settings.items.modelService'),
                 onPress: () => router.push('/settings/provider'),
                 onPressIn: prefetchProviders,
               },
               {
-                icon: SparklesIcon,
+                leading: <SectionIcon icon={SparklesIcon} />,
                 title: t('settings.items.defaultModel'),
                 onPress: () => router.push('/settings/model'),
               },
             ]}
           />
-          <SettingsSection
+          <Section
             items={[
               {
-                icon: EarthIcon,
+                leading: <SectionIcon icon={EarthIcon} />,
                 title: t('settings.items.webSearch'),
                 onPress: () => router.push('/settings/websearch'),
               },
               {
-                imageSource: mcpIcon,
+                leading: <SectionImage source={mcpIcon} />,
                 title: t('settings.items.mcp'),
                 onPress: () => router.push('/settings/mcp'),
               },
             ]}
           />
-          <SettingsSection
+          <Section
             items={[
               {
-                icon: DatabaseIcon,
+                leading: <SectionIcon icon={DatabaseIcon} />,
                 title: t('settings.items.dataBackup'),
                 onPress: () => router.push('/settings/data'),
               },
               {
-                icon: ShieldCheckIcon,
+                leading: <SectionIcon icon={ShieldCheckIcon} />,
                 title: t('settings.items.permissions'),
                 onPress: () => router.push('/settings/permissions'),
               },
             ]}
           />
-          <SettingsSection
+          <Section
             items={[
               {
-                accessory: (
-                  <SettingSelect
-                    label={t('settings.items.appLanguage')}
-                    options={settingPreferences.language.options}
-                    value={settingPreferences.language.value}
-                    onValueChange={settingPreferences.language.onValueChange}
-                  />
-                ),
-                icon: GlobeIcon,
-                title: t('settings.items.appLanguage'),
-              },
-              {
-                accessory: (
-                  <SettingSelect
-                    label={t('settings.items.appearance')}
-                    options={settingPreferences.theme.options}
-                    value={settingPreferences.theme.value}
-                    onValueChange={settingPreferences.theme.onValueChange}
-                  />
-                ),
-                icon: SunIcon,
-                title: t('settings.items.appearance'),
+                leading: <SectionIcon icon={SunIcon} />,
+                onPress: () => router.push('/settings/appearance'),
+                title: t('settings.appearance.title'),
               },
             ]}
           />
-          <SettingsSection
+          <Section
             items={[
               {
-                icon: InfoIcon,
+                leading: <SectionIcon icon={InfoIcon} />,
                 title: t('settings.items.aboutUs'),
                 onPress: () => router.push('/settings/about'),
               },
