@@ -1,14 +1,13 @@
+import {
+  BottomSheet,
+  type BottomSheetCloseReason,
+  useBottomSheet,
+} from '@cherrystudio/ui/components';
 import { LegendList, type LegendListRenderItemProps } from '@legendapp/list/react-native';
 import { CheckIcon } from 'lucide-uniwind/png';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import {
-  BottomSheet,
-  type BottomSheetCloseReason,
-  useBottomSheet,
-} from '@/frontend/components/bottomSheet';
 
 import { SelectionSheetSearchField } from './SelectionSheetSearchField';
 
@@ -147,7 +146,7 @@ function SelectionSheetOptions<TValue extends string>({
   if (options.length === 0) {
     return (
       <View className="flex-1 items-center justify-center px-5">
-        <Text className="text-center text-base text-default-foreground">{emptyText}</Text>
+        <Text className="text-center text-base text-foreground">{emptyText}</Text>
       </View>
     );
   }

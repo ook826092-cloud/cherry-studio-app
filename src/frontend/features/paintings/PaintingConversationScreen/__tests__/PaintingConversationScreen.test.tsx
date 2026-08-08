@@ -51,6 +51,7 @@ const mockFiles: ResolvedPaintingFiles = {
       kind: 'image',
       mediaType: 'image/jpeg',
       name: 'reference.jpg',
+      status: 'ready',
       uri: 'file:///reference.jpg',
     },
   ],
@@ -61,6 +62,7 @@ const mockFiles: ResolvedPaintingFiles = {
       kind: 'image',
       mediaType: 'image/png',
       name: 'painting.png',
+      status: 'ready',
       uri: 'file:///painting.png',
     },
   ],
@@ -115,8 +117,9 @@ jest.mock('@/frontend/features/paintings/hooks/usePaintings', () => ({
   useResolvedPaintingFiles: () => ({ data: mockFiles, isError: false, isLoading: false }),
 }));
 
-jest.mock('@/frontend/features/chat/input', () => ({
-  ChatInputProvider: ({
+jest.mock('@/frontend/components/composer', () => ({
+  ComposerDock: ({ children }: { children: React.ReactNode }) => children,
+  ComposerProvider: ({
     children,
     initialAttachments,
   }: {
@@ -126,6 +129,13 @@ jest.mock('@/frontend/features/chat/input', () => ({
     mockInitialAttachments = initialAttachments;
     return children;
   },
+  useComposerDockLayout: () => ({
+    contentBottomInset: 0,
+    handleInputHeightChange: jest.fn(),
+    inputHeight: 88,
+    inputHeightShared: { value: 0 },
+    keyboardOffset: 26,
+  }),
 }));
 
 jest.mock('@/frontend/features/chat/workspace', () => ({
@@ -135,13 +145,6 @@ jest.mock('@/frontend/features/chat/workspace', () => ({
   },
   ChatWorkspaceFrame: ({ children }: { children: React.ReactNode }) => children,
   ScrollToBottomButton: () => null,
-  useFloatingChatInputLayout: () => ({
-    contentBottomInset: 0,
-    handleInputHeightChange: jest.fn(),
-    inputHeight: 88,
-    inputHeightShared: { value: 0 },
-    keyboardOffset: 26,
-  }),
 }));
 
 jest.mock('@/frontend/features/paintings/components/PaintingInput', () => ({

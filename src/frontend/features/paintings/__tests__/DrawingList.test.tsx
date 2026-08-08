@@ -52,8 +52,8 @@ jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
-jest.mock('heroui-native/toast', () => ({
-  useToast: () => ({ toast: { show: jest.fn() } }),
+jest.mock('@/frontend/components/AlertProvider', () => ({
+  useAlert: () => ({ alert: { show: jest.fn() } }),
 }));
 
 jest.mock('lucide-uniwind/png', () => ({
@@ -106,12 +106,12 @@ jest.mock('@/frontend/features/paintings/hooks/usePaintings', () => ({
   }),
 }));
 
-jest.mock('@/frontend/features/chat/input/hooks/useChatInputPhotoPicker', () => ({
-  CHAT_INPUT_PHOTO_SELECTION_LIMIT: 6,
+jest.mock('../utils/photoLibrary', () => ({
   loadPhotoPreviewPage: jest.fn(),
 }));
 
-jest.mock('@/frontend/features/chat/input/utils/chatInputAttachments', () => ({
+jest.mock('@/frontend/components/composer/utils/composerAttachments', () => ({
+  COMPOSER_PHOTO_SELECTION_LIMIT: 6,
   createPhotoAttachmentDraft: jest.fn(),
 }));
 

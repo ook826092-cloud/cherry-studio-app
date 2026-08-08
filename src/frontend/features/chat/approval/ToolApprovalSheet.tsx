@@ -1,10 +1,8 @@
-import { Button } from '@cherrystudio/ui/components';
+import { BottomSheet, Button } from '@cherrystudio/ui/components';
 import { parseFunctionCallToolName } from '@cherrystudio/universal/ai/tools/mcpToolName';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, Text, View } from 'react-native';
-
-import { BottomSheet } from '@/frontend/components/bottomSheet';
 
 import type { PendingToolApproval } from '../runtime/chatRuntimeProjection';
 import { getBuiltInToolPresentation } from '../utils/builtInToolPresentation';
@@ -63,7 +61,7 @@ export function ToolApprovalSheet({ approvals, isOpen, onRespond }: ToolApproval
           <Text className="text-foreground-tertiary text-sm">
             {t('chat.tool.approval.description')}
           </Text>
-          <Text className="font-semibold text-base text-default-foreground" selectable>
+          <Text className="font-semibold text-base text-foreground" selectable>
             {approval ? formatApprovalTitle(approval, t) : ''}
           </Text>
           {approvals.length > 1 ? (
@@ -107,8 +105,8 @@ function ApprovalArgumentsPreview({ input }: { input: unknown }) {
   return (
     <View className="gap-1">
       <Text className="text-foreground-tertiary text-xs">{t('chat.tool.arguments')}</Text>
-      <ScrollView className="max-h-48 rounded-md bg-surface-tertiary" nestedScrollEnabled>
-        <Text className="p-2 font-mono text-default-foreground text-xs" selectable>
+      <ScrollView className="max-h-48 rounded-md bg-secondary" nestedScrollEnabled>
+        <Text className="p-2 font-mono text-foreground text-xs" selectable>
           {preview}
         </Text>
       </ScrollView>

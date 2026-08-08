@@ -1,5 +1,6 @@
 import type { CanonicalParamKey } from '@cherrystudio/provider-registry';
 import {
+  BottomSheet,
   Description,
   FieldError,
   Input,
@@ -8,6 +9,7 @@ import {
   Slider,
   Switch,
   TextField,
+  useBottomSheet,
 } from '@cherrystudio/ui/components';
 import type { TFunction } from 'i18next';
 import { CheckIcon, ChevronRightIcon } from 'lucide-uniwind/png';
@@ -16,9 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BottomSheet } from '@/frontend/components/bottomSheet';
 import { SlotText } from '@/frontend/components/SlotText';
-import { bottomSheet } from '@/frontend/utils/constants';
 
 import { imageParamLabel, imageParamOptionLabel } from '../utils/imageGenerationLabels';
 import type {
@@ -54,17 +54,16 @@ export function PaintingSettingsBottomSheet({
 }: PaintingSettingsBottomSheetProps) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const { height: windowHeight } = useWindowDimensions();
   const [activeEnumKey, setActiveEnumKey] = useState<CanonicalParamKey | null>(null);
   const fields = getImageParamFields(resolvedMode);
   const activeEnumField = fields.find(
     (field): field is EnumImageParamField =>
       field.key === activeEnumKey && field.spec.type === 'enum' && field.spec.render !== 'chips',
   );
-  const sheetWidth = Math.max(0, windowWidth - bottomSheet.outerInset * 2);
-  const availableHeight = windowHeight - insets.top - insets.bottom - bottomSheet.outerInset * 2;
+  const availableHeight = windowHeight - insets.top - insets.bottom;
   const sheetHeight = Math.min(680, Math.max(360, availableHeight * 0.78));
-  const fieldWidth = Math.max(0, sheetWidth - 48);
+  const pageKey = activeEnumField ? `enum-${activeEnumField.key}` : 'settings';
 
   return (
     <BottomSheet
@@ -78,36 +77,67 @@ export function PaintingSettingsBottomSheet({
         activeEnumField ? imageParamLabel(t, activeEnumField.key) : t('painting.settings.title')
       }
     >
-      {activeEnumField ? (
-        <EnumSelectionPage
-          field={activeEnumField}
+      <BottomSheet.PageTransition
+        depth={activeEnumField ? 1 : 0}
+        pageKey={pageKey}
+        testID="painting-settings-pages"
+      >
+        {activeEnumField ? (
+          <EnumSelectionPage
+            field={activeEnumField}
+            fields={fields}
+            onValueChange={onValueChange}
+            values={values}
+          />
+        ) : (
+          <PaintingSettingsRootPage
+            fields={fields}
+            onValueChange={onValueChange}
+            onEnumPress={setActiveEnumKey}
+            values={values}
+            safeAreaBottom={insets.bottom}
+          />
+        )}
+      </BottomSheet.PageTransition>
+    </BottomSheet>
+  );
+}
+
+function PaintingSettingsRootPage({
+  fields,
+  onEnumPress,
+  onValueChange,
+  safeAreaBottom,
+  values,
+}: {
+  fields: readonly ImageParamField[];
+  onEnumPress: (key: CanonicalParamKey) => void;
+  onValueChange: (key: string, value: unknown) => void;
+  safeAreaBottom: number;
+  values: ImageParamDraft;
+}) {
+  const { geometry } = useBottomSheet();
+  const fieldWidth = Math.max(0, geometry.sheetWidth - 48);
+
+  return (
+    <ScrollView
+      contentContainerStyle={[styles.content, { paddingBottom: Math.max(24, safeAreaBottom + 12) }]}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      style={styles.page}
+    >
+      {fields.map((field) => (
+        <PaintingSettingField
+          field={field}
+          fieldWidth={fieldWidth}
           fields={fields}
+          key={field.key}
+          onEnumPress={onEnumPress}
           onValueChange={onValueChange}
           values={values}
         />
-      ) : (
-        <ScrollView
-          contentContainerStyle={[
-            styles.content,
-            { paddingBottom: Math.max(24, insets.bottom + 12) },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {fields.map((field) => (
-            <PaintingSettingField
-              field={field}
-              fieldWidth={fieldWidth}
-              fields={fields}
-              key={field.key}
-              onEnumPress={setActiveEnumKey}
-              onValueChange={onValueChange}
-              values={values}
-            />
-          ))}
-        </ScrollView>
-      )}
-    </BottomSheet>
+      ))}
+    </ScrollView>
   );
 }
 
@@ -179,7 +209,7 @@ function PaintingSettingField({
         <View className="gap-3">
           <View className="flex-row items-center justify-between gap-3">
             <Text className="font-medium text-foreground text-sm">{label}</Text>
-            <Text className="text-default-foreground text-sm" style={styles.tabularText}>
+            <Text className="text-foreground text-sm" style={styles.tabularText}>
               {numericValue}
             </Text>
           </View>
@@ -249,7 +279,7 @@ function AspectRatioField({
     <View className="gap-2">
       <View className="flex-row items-center justify-between gap-3">
         <Text className="font-medium text-foreground text-sm">{imageParamLabel(t, field.key)}</Text>
-        <SlotText text={headerText} textClassName="font-medium text-default-foreground text-sm" />
+        <SlotText text={headerText} textClassName="font-medium text-foreground text-sm" />
       </View>
       <Section>
         <Section.Item className="p-4">
@@ -337,7 +367,7 @@ function AspectRatioOption({
         className={
           isSelected
             ? 'font-semibold text-foreground text-sm'
-            : 'font-medium text-default-foreground text-sm'
+            : 'font-medium text-foreground text-sm'
         }
         numberOfLines={1}
         style={styles.tabularText}
@@ -378,7 +408,7 @@ function EnumChipsField({
               className={
                 isSelected
                   ? 'h-14 items-center justify-center gap-1 rounded-lg border border-primary bg-primary/10 px-2 active:opacity-70'
-                  : 'h-14 items-center justify-center gap-1 rounded-lg border border-border bg-surface-secondary px-2 active:opacity-70'
+                  : 'h-14 items-center justify-center gap-1 rounded-lg border border-border bg-secondary px-2 active:opacity-70'
               }
               key={option}
               onPress={() => onValueChange(field.key, option)}
@@ -424,13 +454,10 @@ function EnumSettingRow({
         testID={`painting-setting-${field.key}`}
         trailing={
           <View className="min-w-0 max-w-56 flex-row items-center justify-end gap-1">
-            <Text
-              className="min-w-0 shrink text-right text-base text-default-foreground"
-              numberOfLines={1}
-            >
+            <Text className="min-w-0 shrink text-right text-base text-foreground" numberOfLines={1}>
               {selectedLabel}
             </Text>
-            <ChevronRightIcon className="size-5 shrink-0 text-default-foreground" strokeWidth={2} />
+            <ChevronRightIcon className="size-5 shrink-0 text-foreground" strokeWidth={2} />
           </View>
         }
       />
@@ -458,6 +485,7 @@ function EnumSelectionPage({
       contentContainerStyle={styles.selectionContent}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
+      style={styles.page}
       testID={`painting-setting-options-${field.key}`}
     >
       <Section>
@@ -527,7 +555,7 @@ function CustomSizeField({
           style={styles.sizeInput}
           value={width === undefined || width === null ? '' : String(width)}
         />
-        <Text className="text-default-foreground">×</Text>
+        <Text className="text-foreground">×</Text>
         <Input
           accessibilityLabel={t('painting.settings.height')}
           keyboardType="number-pad"
@@ -633,6 +661,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 12,
   },
+  page: { flex: 1 },
   ratioDashedShape: { borderStyle: 'dashed' },
   selectionContent: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 8 },
   sizeInput: {

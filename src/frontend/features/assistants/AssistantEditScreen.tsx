@@ -9,13 +9,13 @@ import {
 import type { UniqueModelId } from '@cherrystudio/universal/data/types/model';
 import type { ReasoningEffortOption } from '@cherrystudio/universal/types/aiSdk';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useToast } from 'heroui-native/toast';
 import { ChevronDownIcon } from 'lucide-uniwind/png';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
+import { useAlert } from '@/frontend/components/AlertProvider';
 import { BackHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
 import {
   ModelPickerBottomSheet,
@@ -69,9 +69,7 @@ export default function AssistantEditScreen() {
       <>
         <BackHeader title={t('assistant.edit.title')} />
         <View className="p-4">
-          <Text className="text-center text-default-foreground text-sm">
-            {t('assistant.form.loading')}
-          </Text>
+          <Text className="text-center text-foreground text-sm">{t('assistant.form.loading')}</Text>
         </View>
       </>
     );
@@ -89,7 +87,7 @@ function AssistantEditForm({
 }) {
   const { t } = useTranslation();
   const router = useRouter();
-  const { toast } = useToast();
+  const { alert } = useAlert();
   const isEditing = Boolean(assistantId);
   const { createAssistant, isCreating, isUpdating, updateAssistant } = useAssistantMutations();
   const modelPickerData = useModelPickerData();
@@ -176,7 +174,7 @@ function AssistantEditForm({
     const dto = buildAssistantDto(form, assistant?.settings);
 
     if (!dto.ok) {
-      toast.show({ label: t(dto.errorKey), variant: 'danger' });
+      alert.show({ title: t(dto.errorKey) });
       return;
     }
 
@@ -189,12 +187,9 @@ function AssistantEditForm({
 
       router.back();
     } catch {
-      toast.show({
-        label: t('assistant.toast.saveFailed'),
-        variant: 'danger',
-      });
+      alert.show({ title: t('assistant.toast.saveFailed') });
     }
-  }, [assistant?.settings, assistantId, createAssistant, form, router, t, toast, updateAssistant]);
+  }, [alert, assistant?.settings, assistantId, createAssistant, form, router, t, updateAssistant]);
   const title = isEditing ? t('assistant.edit.title') : t('assistant.create.title');
   const saveActions = useMemo<HeaderToolbarAction[]>(
     () => [
@@ -280,7 +275,7 @@ function AssistantEditForm({
                 {selectedModel.provider.name}
               </Text>
             ) : (
-              <Text className="min-w-0 flex-1 text-base text-default-foreground" numberOfLines={1}>
+              <Text className="min-w-0 flex-1 text-base text-foreground" numberOfLines={1}>
                 {t('assistant.model.none')}
               </Text>
             )}
@@ -293,14 +288,14 @@ function AssistantEditForm({
                     size={20}
                   />
                   <Text
-                    className="min-w-0 shrink text-right text-default-foreground text-sm"
+                    className="min-w-0 shrink text-right text-foreground text-sm"
                     numberOfLines={1}
                   >
                     {selectedModel.model.name}
                   </Text>
                 </>
               ) : null}
-              <ChevronDownIcon className="size-6 text-default-foreground" strokeWidth={2} />
+              <ChevronDownIcon className="size-6 text-foreground" strokeWidth={2} />
             </View>
           </Pressable>
           <SwitchRow
@@ -386,15 +381,12 @@ function AssistantEditForm({
             </Text>
             <View className="min-w-0 max-w-48 flex-row items-center justify-end gap-1">
               <Text
-                className="min-w-0 shrink text-right text-base text-default-foreground"
+                className="min-w-0 shrink text-right text-base text-foreground"
                 numberOfLines={1}
               >
                 {selectedMcpMode?.label}
               </Text>
-              <ChevronDownIcon
-                className="size-5 shrink-0 text-default-foreground"
-                strokeWidth={2}
-              />
+              <ChevronDownIcon className="size-5 shrink-0 text-foreground" strokeWidth={2} />
             </View>
           </Pressable>
           {form.mcpMode === 'manual' ? (
@@ -410,9 +402,7 @@ function AssistantEditForm({
                 ))}
               </View>
             ) : (
-              <Text className="text-default-foreground text-xs">
-                {t('assistant.form.mcpNoServers')}
-              </Text>
+              <Text className="text-foreground text-xs">{t('assistant.form.mcpNoServers')}</Text>
             )
           ) : null}
         </FormSection>
@@ -447,8 +437,8 @@ function AssistantEditForm({
 function FormSection({ children, title }: { children: React.ReactNode; title: string }) {
   return (
     <View className="gap-2">
-      <Text className="px-1 font-medium text-default-foreground text-sm">{title}</Text>
-      <View className="gap-4 rounded-2xl bg-settings-grouped-surface p-4">{children}</View>
+      <Text className="px-1 font-medium text-foreground text-sm">{title}</Text>
+      <View className="gap-4 rounded-2xl bg-grouped-surface p-4">{children}</View>
     </View>
   );
 }

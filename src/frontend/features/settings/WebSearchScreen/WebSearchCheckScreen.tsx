@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, Text, View } from 'react-native';
 
-import { useAppAlert } from '@/frontend/components/AppAlertProvider';
+import { useAlert } from '@/frontend/components/AlertProvider';
 import { BackHeader } from '@/frontend/components/headers';
 import {
   SingleSelectionSheet,
@@ -37,7 +37,7 @@ export default function WebSearchCheckScreen() {
   const { providerId } = useLocalSearchParams<{ providerId?: string }>();
   const { t } = useTranslation();
   const { toast } = useToast();
-  const { showMessage } = useAppAlert();
+  const { alert } = useAlert();
   const webSearch = useBackendModule('webSearch');
   const webSearchProviders = useWebSearchProviderPreferences();
   const [isApiKeySheetOpen, setIsApiKeySheetOpen] = useState(false);
@@ -87,7 +87,7 @@ export default function WebSearchCheckScreen() {
     }
 
     if (!selectedApiKey) {
-      showMessage({
+      alert.show({
         description: t('settings.websearch.provider.checkNoApiKeys'),
         title: t('settings.websearch.provider.checkFailed'),
       });
@@ -115,7 +115,7 @@ export default function WebSearchCheckScreen() {
         toast.show({ label: message, variant: 'success' });
       } else {
         const message = result.error || t('settings.websearch.provider.checkFailed');
-        showMessage({
+        alert.show({
           description: message,
           title: t('settings.websearch.provider.checkFailed'),
         });
@@ -126,7 +126,7 @@ export default function WebSearchCheckScreen() {
       }
       const message =
         error instanceof Error ? error.message : t('settings.websearch.provider.checkFailed');
-      showMessage({
+      alert.show({
         description: message,
         title: t('settings.websearch.provider.checkFailed'),
       });
@@ -155,22 +155,19 @@ export default function WebSearchCheckScreen() {
             trailing={
               <View className="min-w-0 max-w-56 flex-row items-center justify-end gap-1">
                 <Text
-                  className="min-w-0 shrink text-right text-base text-default-foreground"
+                  className="min-w-0 shrink text-right text-base text-foreground"
                   numberOfLines={1}
                 >
                   {selectedApiKey?.label ?? t('settings.websearch.provider.checkNoApiKeys')}
                 </Text>
-                <ChevronRightIcon
-                  className="size-5 shrink-0 text-default-foreground"
-                  strokeWidth={2}
-                />
+                <ChevronRightIcon className="size-5 shrink-0 text-foreground" strokeWidth={2} />
               </View>
             }
           />
         </Section>
 
         {successMessage ? (
-          <View className="gap-1 rounded-xl bg-settings-grouped-surface px-4 py-3">
+          <View className="gap-1 rounded-xl bg-grouped-surface px-4 py-3">
             <Text selectable className="text-base text-success">
               {successMessage}
             </Text>

@@ -7,7 +7,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { TopicList } from '../TopicList';
 
 const mockToggleTopicPin = jest.fn(async () => undefined);
-const mockToastShow = jest.fn();
+const mockAlertShow = jest.fn();
 const mockTopic = {
   assistantId: 'assistant-1',
   id: 'topic-1',
@@ -43,10 +43,6 @@ jest.mock('@legendapp/list/react-native', () => {
   };
 });
 
-jest.mock('heroui-native/toast', () => ({
-  useToast: () => ({ toast: { show: mockToastShow } }),
-}));
-
 jest.mock('lucide-uniwind/png', () => ({
   CheckIcon: () => null,
   PencilIcon: () => null,
@@ -66,6 +62,7 @@ jest.mock('react-i18next', () => ({
         'navigation.newChat': 'New chat',
         'topic.actions.pin': 'Pin topic',
         'topic.actions.unpin': 'Unpin topic',
+        'topic.pin.failed': 'Failed to update pin state',
         'topic.updatedAt.yesterday': 'Yesterday',
       })[key] ?? key,
   }),
@@ -111,6 +108,10 @@ jest.mock('react-native-safe-area-context', () => ({
 
 jest.mock('@/frontend/hooks/chat', () => ({
   useAssistantsApi: () => ({ assistants: [mockAssistant] }),
+}));
+
+jest.mock('@/frontend/components/AlertProvider', () => ({
+  useAlert: () => ({ alert: { show: mockAlertShow } }),
 }));
 
 jest.mock('@/frontend/hooks/useExclusiveSwipeable', () => ({
@@ -178,6 +179,22 @@ describe('TopicList pin action', () => {
     expect(mockToggleTopicPin).toHaveBeenCalledWith('topic-1');
   });
 
+  it('shows an alert when updating the pin state fails', async () => {
+    mockToggleTopicPin.mockRejectedValueOnce(new Error('Pin failed'));
+
+    await act(async () => {
+      renderer = create(<TopicList />);
+    });
+
+    const pinButton = renderer?.root.findByProps({ accessibilityLabel: 'Pin topic' });
+
+    await act(async () => {
+      pinButton?.props.onPress();
+    });
+
+    expect(mockAlertShow).toHaveBeenCalledWith({ title: 'Failed to update pin state' });
+  });
+
   it('uses a highlighted background and unpin action for pinned topics', async () => {
     mockPinnedTopicIds = ['topic-1'];
 
@@ -188,8 +205,7 @@ describe('TopicList pin action', () => {
     expect(renderer?.root.findByProps({ accessibilityLabel: 'Unpin topic' })).toBeTruthy();
     const highlightedRows =
       renderer?.root.findAllByProps({
-        className:
-          'relative min-w-0 flex-1 flex-row items-center gap-2 bg-surface-secondary py-2 pl-2',
+        className: 'relative min-w-0 flex-1 flex-row items-center gap-2 bg-secondary py-2 pl-2',
       }) ?? [];
     expect(highlightedRows.length).toBeGreaterThan(0);
   });

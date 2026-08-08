@@ -1,3 +1,4 @@
+import { BottomSheet } from '@cherrystudio/ui/components';
 import type { CherryMessagePart } from '@cherrystudio/universal/data/types/message';
 import { readCherryMeta } from '@cherrystudio/universal/data/types/uiParts';
 import type { Detent } from '@swmansion/react-native-bottom-sheet';
@@ -6,8 +7,6 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import { BottomSheet } from '@/frontend/components/bottomSheet';
 
 import { PrismSweep } from '../../prismSweep';
 import { useThinkingTimerMs } from '../hooks/useThinkingTimerMs';
@@ -56,10 +55,10 @@ export function ReasoningPart({ isStreaming, part }: ReasoningPartProps) {
         onPress={() => setIsSheetOpen(true)}
       >
         {isThinking ? <PrismSweep active size={16} /> : null}
-        <Text className="flex-1 text-default-foreground text-sm" numberOfLines={1}>
+        <Text className="flex-1 text-foreground text-sm" numberOfLines={1}>
           {statusText}
         </Text>
-        <ChevronRightIcon className="size-4 text-default-foreground" strokeWidth={2} />
+        <ChevronRightIcon className="size-4 text-foreground" strokeWidth={2} />
       </Pressable>
       {isSheetOpen ? (
         <ReasoningDetailSheet

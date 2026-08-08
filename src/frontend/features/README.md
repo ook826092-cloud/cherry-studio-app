@@ -53,8 +53,9 @@ ESLint enforces these (see the boundary blocks in `eslint.config.js`):
   `@/frontend/features/chat/workspace`). Deep value imports past that are lint errors; type-only deep
   imports are allowed.
 - A small allowlist of pure-logic modules is sanctioned for direct deep import so logic-only
-  consumers don't load a component barrel (documented in `chat/input/index.ts`); extend it
-  deliberately, in the same commit that adds the new dependency.
+  consumers don't load a component barrel (documented in
+  `src/frontend/components/composer/index.ts`); extend it deliberately, in the same commit that adds
+  the new dependency.
 - Cross-feature reusable modules with two or more feature owners belong in neutral
   `src/frontend/components`, `src/frontend/hooks`, or `src/frontend/utils` — move them when the
   second owner appears.
@@ -97,4 +98,4 @@ ESLint enforces these (see the boundary blocks in `eslint.config.js`):
 Reusable modules that remain in `src/frontend/components` include app shell modules (`headers`,
 `navigation`), shared flows such as `modelPicker`, the neutral `messageTabs`
 scope/selection/source-registry shared by the messages shell and its tab bodies, shared UI
-behavior such as `AppAlertProvider`, and native dependency adapters such as `nativePrimitives`.
+behavior such as `AlertProvider`, and native dependency adapters such as `nativePrimitives`.

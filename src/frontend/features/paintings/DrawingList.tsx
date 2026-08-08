@@ -1,7 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
-import { useToast } from 'heroui-native/toast';
 import { CheckIcon, ImageIcon } from 'lucide-uniwind/png';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -15,6 +14,12 @@ import {
 } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
+import { useAlert } from '@/frontend/components/AlertProvider';
+import {
+  COMPOSER_PHOTO_SELECTION_LIMIT,
+  type ComposerAttachmentDraft,
+  createPhotoAttachmentDraft,
+} from '@/frontend/components/composer/utils/composerAttachments';
 import {
   useMessageListBottomInset,
   useMessagePendingDeletionIds,
@@ -25,15 +30,6 @@ import {
 } from '@/frontend/components/messageTabs';
 import { Image } from '@/frontend/components/nativePrimitives';
 import { PaintingZoomLink } from '@/frontend/components/navigation';
-import {
-  CHAT_INPUT_PHOTO_SELECTION_LIMIT,
-  type ChatInputPhotoPreview,
-  loadPhotoPreviewPage,
-} from '@/frontend/features/chat/input/hooks/useChatInputPhotoPicker';
-import {
-  type ChatInputAttachmentDraft,
-  createPhotoAttachmentDraft,
-} from '@/frontend/features/chat/input/utils/chatInputAttachments';
 
 import {
   type PaintingGalleryItem,
@@ -47,6 +43,7 @@ import {
   createPaintingDraftHandoff,
   type PaintingDraftHandoff,
 } from './utils/paintingDraftHandoff';
+import { loadPhotoPreviewPage, type PhotoPreview } from './utils/photoLibrary';
 
 const recentPhotoLimit = 12;
 const galleryGap = 6;
@@ -54,7 +51,7 @@ const pageEdge = 16;
 
 export function DrawingList() {
   const { t } = useTranslation();
-  const { toast } = useToast();
+  const { alert } = useAlert();
   const router = useRouter();
   const { scope } = useMessageScope();
   const { isEditing, selectedIds } = useMessageSelectionState();
@@ -89,7 +86,7 @@ export function DrawingList() {
     [router],
   );
   const openPaintingWithAttachments = useCallback(
-    (attachments: readonly ChatInputAttachmentDraft[]) => {
+    (attachments: readonly ComposerAttachmentDraft[]) => {
       openPainting({ attachments });
     },
     [openPainting],
@@ -104,18 +101,15 @@ export function DrawingList() {
     [openPainting],
   );
   const handleRecentPhotoPress = useCallback(
-    async (photo: ChatInputPhotoPreview) => {
+    async (photo: PhotoPreview) => {
       try {
         const uri = await new MediaLibrary.Asset(photo.id).getUri();
         openPaintingWithAttachments([createPhotoAttachmentDraft({ ...photo, uri })]);
       } catch (error) {
-        toast.show({
-          label: error instanceof Error ? error.message : String(error),
-          variant: 'danger',
-        });
+        alert.show({ title: error instanceof Error ? error.message : String(error) });
       }
     },
-    [openPaintingWithAttachments, toast],
+    [alert, openPaintingWithAttachments],
   );
   const handleViewAllPress = useCallback(async () => {
     try {
@@ -128,7 +122,7 @@ export function DrawingList() {
         mediaTypes: ['images'],
         orderedSelection: true,
         quality: 1,
-        selectionLimit: CHAT_INPUT_PHOTO_SELECTION_LIMIT,
+        selectionLimit: COMPOSER_PHOTO_SELECTION_LIMIT,
       });
       if (result.canceled || result.assets.length === 0) {
         return;
@@ -147,12 +141,9 @@ export function DrawingList() {
       });
       openPaintingWithAttachments(attachments);
     } catch (error) {
-      toast.show({
-        label: error instanceof Error ? error.message : String(error),
-        variant: 'danger',
-      });
+      alert.show({ title: error instanceof Error ? error.message : String(error) });
     }
-  }, [openPaintingWithAttachments, toast]);
+  }, [alert, openPaintingWithAttachments]);
 
   return (
     <ScrollView
@@ -223,7 +214,7 @@ export function DrawingList() {
             ) : (
               <Pressable
                 accessibilityRole="button"
-                className="mx-4 h-20 items-center justify-center rounded-md bg-surface-secondary active:opacity-70"
+                className="mx-4 h-20 items-center justify-center rounded-md bg-secondary active:opacity-70"
                 onPress={() => void handleViewAllPress()}
               >
                 <ImageIcon className="size-6 text-foreground-tertiary" strokeWidth={1.5} />
@@ -251,7 +242,7 @@ export function DrawingList() {
             onPress={handleCreatePainting}
             testID="painting-history-create"
           >
-            <Text className="font-medium text-sm text-white" numberOfLines={1}>
+            <Text className="font-medium text-primary-foreground text-sm" numberOfLines={1}>
               {t('painting.history.create')}
             </Text>
           </Pressable>
@@ -319,7 +310,7 @@ function DrawingGridItem({
         accessibilityLabel={label}
         accessibilityRole="checkbox"
         accessibilityState={{ checked: isSelected }}
-        className="overflow-hidden rounded-md bg-surface-secondary active:opacity-75"
+        className="overflow-hidden rounded-md bg-secondary active:opacity-75"
         onPress={() => onToggle(item.painting.id)}
         style={{ height }}
         testID={`painting-history-${item.key}`}
@@ -332,10 +323,10 @@ function DrawingGridItem({
         >
           {isSelected ? (
             <View className="size-6 items-center justify-center rounded-full bg-primary">
-              <CheckIcon className="size-4 text-white" strokeWidth={3} />
+              <CheckIcon className="size-4 text-primary-foreground" strokeWidth={3} />
             </View>
           ) : (
-            <View className="size-6 rounded-full border-2 border-border-strong bg-black/30" />
+            <View className="size-6 rounded-full border-2 border-border-strong bg-constant-black/30" />
           )}
         </Animated.View>
       </Pressable>
@@ -347,7 +338,7 @@ function DrawingGridItem({
       <Pressable
         accessibilityLabel={label}
         accessibilityRole="button"
-        className="overflow-hidden rounded-md bg-surface-secondary active:opacity-75"
+        className="overflow-hidden rounded-md bg-secondary active:opacity-75"
         style={{ height }}
         testID={`painting-history-${item.key}`}
       >
@@ -359,7 +350,7 @@ function DrawingGridItem({
 
 function useRecentPaintingPhotos(enabled: boolean) {
   const [isLoading, setLoading] = useState(true);
-  const [photos, setPhotos] = useState<ChatInputPhotoPreview[]>([]);
+  const [photos, setPhotos] = useState<PhotoPreview[]>([]);
 
   useEffect(() => {
     if (!enabled) {

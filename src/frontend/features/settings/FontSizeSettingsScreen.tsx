@@ -1,9 +1,9 @@
 import { Slider } from '@cherrystudio/ui/components';
-import { useToast } from 'heroui-native/toast';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, Text, View } from 'react-native';
 
+import { useAlert } from '@/frontend/components/AlertProvider';
 import { BackHeader } from '@/frontend/components/headers';
 import { MarkdownText } from '@/frontend/components/markdown';
 import { usePreference } from '@/frontend/data/hooks';
@@ -14,7 +14,7 @@ import { FONT_SIZE_STEP_LABEL_KEYS } from './utils/fontSizeOptions';
 
 export default function FontSizeSettingsScreen() {
   const { t } = useTranslation();
-  const { toast } = useToast();
+  const { alert } = useAlert();
   const [storedStep, setStoredStep] = usePreference('ui.font_size_step');
   const [draftStep, setDraftStep] = useState(() => normalizeFontSizeStep(storedStep));
   const persistenceVersionRef = useRef(0);
@@ -34,7 +34,7 @@ export default function FontSizeSettingsScreen() {
       const restoredStep = normalizeFontSizeStep(storedStep);
       setDraftStep(restoredStep);
       applyFontSizeStepPreference(restoredStep);
-      toast.show({ label: t('settings.fontSize.saveFailed'), variant: 'danger' });
+      alert.show({ title: t('settings.fontSize.saveFailed') });
     });
   };
 
@@ -48,12 +48,12 @@ export default function FontSizeSettingsScreen() {
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
       >
-        <View className="gap-4 rounded-xl bg-settings-grouped-surface px-4 py-5">
+        <View className="gap-4 rounded-xl bg-grouped-surface px-4 py-5">
           <View className="flex-row items-center justify-between gap-3">
             <Text className="font-medium text-foreground text-base">
               {t('settings.fontSize.title')}
             </Text>
-            <Text className="text-default-foreground text-sm">
+            <Text className="text-foreground text-sm">
               {t(FONT_SIZE_STEP_LABEL_KEYS[draftStep])}
             </Text>
           </View>
@@ -70,10 +70,10 @@ export default function FontSizeSettingsScreen() {
         </View>
 
         <View className="gap-2">
-          <Text className="px-1 font-medium text-default-foreground text-sm">
+          <Text className="px-1 font-medium text-foreground text-sm">
             {t('settings.fontSize.previewTitle')}
           </Text>
-          <View className="rounded-xl bg-settings-grouped-surface px-4 py-5">
+          <View className="rounded-xl bg-grouped-surface px-4 py-5">
             <MarkdownText
               fontSizeStep={draftStep}
               markdown={t('settings.fontSize.previewMarkdown')}

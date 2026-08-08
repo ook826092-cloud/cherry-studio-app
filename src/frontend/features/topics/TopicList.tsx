@@ -1,7 +1,6 @@
 import type { Assistant } from '@cherrystudio/universal/data/types/assistant';
 import type { Topic } from '@cherrystudio/universal/data/types/topic';
 import { LegendList, type LegendListRenderItemProps } from '@legendapp/list/react-native';
-import { useToast } from 'heroui-native/toast';
 import { CheckIcon, PencilIcon, PinIcon, PinOffIcon, Trash2Icon } from 'lucide-uniwind/png';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -19,6 +18,7 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 
+import { useAlert } from '@/frontend/components/AlertProvider';
 import {
   useMessageListBottomInset,
   useMessagePendingDeletionIds,
@@ -99,7 +99,7 @@ function formatTopicUpdatedAt(updatedAt: string, locale: string | undefined, yes
 
 const TopicListView = memo(function TopicListView() {
   const { t } = useTranslation();
-  const { toast } = useToast();
+  const { alert } = useAlert();
   const bottomInset = useMessageListBottomInset();
   const { isPinActionDisabled, isTopicListLoading, pinnedTopicIds, topics } = useTopicListTopics();
   const { loadMoreTopics, openTopic, toggleTopicPin } = useTopicListActions();
@@ -141,10 +141,10 @@ const TopicListView = memo(function TopicListView() {
   const handleTogglePin = useCallback(
     (topicId: string) => {
       void toggleTopicPin(topicId).catch(() => {
-        toast.show({ label: t('topic.pin.failed'), variant: 'danger' });
+        alert.show({ title: t('topic.pin.failed') });
       });
     },
-    [t, toast, toggleTopicPin],
+    [alert, t, toggleTopicPin],
   );
 
   const renderItem = useCallback(
@@ -187,7 +187,7 @@ const TopicListView = memo(function TopicListView() {
     () => (
       <View className="items-center justify-center px-6 py-8">
         {isTopicListLoading ? null : (
-          <Text className="text-center text-default-foreground text-sm">
+          <Text className="text-center text-foreground text-sm">
             {t('navigation.noMatchingChats')}
           </Text>
         )}
@@ -414,12 +414,12 @@ const TopicRow = memo(function TopicRow({
           <View
             className={
               isPinned
-                ? 'relative min-w-0 flex-1 flex-row items-center gap-2 bg-surface-secondary py-2 pl-2'
+                ? 'relative min-w-0 flex-1 flex-row items-center gap-2 bg-secondary py-2 pl-2'
                 : 'relative min-w-0 flex-1 flex-row items-center gap-2 bg-transparent py-2 pl-2'
             }
           >
             <Animated.View
-              className="absolute inset-0 bg-settings-grouped-surface"
+              className="absolute inset-0 bg-secondary"
               pointerEvents="none"
               style={pressedBackgroundStyle}
             />
@@ -448,7 +448,9 @@ const TopicRow = memo(function TopicRow({
                       : 'size-6 items-center justify-center rounded-full border-2 border-border-strong'
                   }
                 >
-                  {isSelected ? <CheckIcon className="size-4 text-white" strokeWidth={3} /> : null}
+                  {isSelected ? (
+                    <CheckIcon className="size-4 text-primary-foreground" strokeWidth={3} />
+                  ) : null}
                 </View>
               </Animated.View>
             ) : null}
@@ -496,7 +498,7 @@ function TopicActions({ deleteLabel, drag, onDelete, onRename, renameLabel }: To
       <Pressable
         accessibilityLabel={renameLabel}
         accessibilityRole="button"
-        className="w-16 items-center justify-center bg-surface-secondary active:opacity-80"
+        className="w-16 items-center justify-center bg-secondary active:opacity-80"
         onPress={onRename}
       >
         <PencilIcon className="size-5 text-foreground" strokeWidth={2} />
@@ -504,10 +506,10 @@ function TopicActions({ deleteLabel, drag, onDelete, onRename, renameLabel }: To
       <Pressable
         accessibilityLabel={deleteLabel}
         accessibilityRole="button"
-        className="w-16 items-center justify-center bg-danger active:opacity-80"
+        className="w-16 items-center justify-center bg-destructive active:opacity-80"
         onPress={onDelete}
       >
-        <Trash2Icon className="size-5 text-danger-foreground" strokeWidth={2} />
+        <Trash2Icon className="size-5 text-destructive-foreground" strokeWidth={2} />
       </Pressable>
     </Animated.View>
   );
@@ -536,9 +538,9 @@ function TopicPinAction({ disabled, drag, isPinned, label, onPress }: TopicPinAc
         onPress={onPress}
       >
         {isPinned ? (
-          <PinOffIcon className="size-5 text-white" strokeWidth={2} />
+          <PinOffIcon className="size-5 text-primary-foreground" strokeWidth={2} />
         ) : (
-          <PinIcon className="size-5 text-white" strokeWidth={2} />
+          <PinIcon className="size-5 text-primary-foreground" strokeWidth={2} />
         )}
       </Pressable>
     </Animated.View>

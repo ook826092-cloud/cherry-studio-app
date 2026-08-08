@@ -2,12 +2,13 @@ import type { Message } from '@cherrystudio/universal/data/types/message';
 import { useKeyboardChatComposerInset } from '@legendapp/list/keyboard';
 import type { LegendListRef } from '@legendapp/list/react-native';
 import { useHeaderHeight } from 'expo-router/react-navigation';
-import { useToast } from 'heroui-native/toast';
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { View } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
 
+import { useAlert } from '@/frontend/components/AlertProvider';
+import { useComposerDockLayout } from '@/frontend/components/composer';
 import type { MessagesViewModel } from '@/frontend/hooks/chat';
 import { isIOS } from '@/frontend/utils/constants';
 import { loggerService } from '@/shared/core/logger/LoggerService';
@@ -25,7 +26,6 @@ import { ChatMessageList } from './components/ChatMessageList';
 import { ChatOlderMessagesIndicator } from './components/ChatOlderMessagesIndicator';
 import { ChatWorkspaceFrame } from './components/ChatWorkspaceFrame';
 import { ScrollToBottomButton } from './components/ScrollToBottomButton';
-import { useFloatingChatInputLayout } from './hooks/useFloatingChatInputLayout';
 import {
   shouldWaitForInitialHistoryLayout,
   useMessageListInitialRenderGate,
@@ -53,7 +53,7 @@ export function ChatWorkspace({ messageWindow, renderGateKey, topicId }: ChatWor
   const chatTopic = useChatTopic(topicId);
   const headerHeight = useHeaderHeight();
   const { t } = useTranslation();
-  const { toast } = useToast();
+  const { alert } = useAlert();
   const listRef = useRef<LegendListRef | null>(null);
   const composerRef = useRef<View | null>(null);
   const isAtBottom = useSharedValue(true);
@@ -73,10 +73,10 @@ export function ChatWorkspace({ messageWindow, renderGateKey, topicId }: ChatWor
         await chat.respondToolApproval({ ...input, topicId });
       } catch (error) {
         logger.error('Tool approval response failed', error as Error);
-        toast.show({ label: t('chat.tool.approval.failed'), variant: 'danger' });
+        alert.show({ title: t('chat.tool.approval.failed') });
       }
     },
-    [chat, t, toast, topicId],
+    [alert, chat, t, topicId],
   );
   const requiresInitialHistoryLayout = shouldWaitForInitialHistoryLayout({
     hasHistoryBeforePendingTurn: chatTopic.hasHistoryBeforePendingTurn,
@@ -89,7 +89,7 @@ export function ChatWorkspace({ messageWindow, renderGateKey, topicId }: ChatWor
   });
   const contentTopInset = isIOS ? headerHeight : 0;
   const { contentBottomInset, handleInputHeightChange, inputHeightShared, keyboardOffset } =
-    useFloatingChatInputLayout();
+    useComposerDockLayout();
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
     composerRef,

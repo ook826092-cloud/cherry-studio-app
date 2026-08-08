@@ -17,7 +17,7 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 
-import { useAppAlert } from '@/frontend/components/AppAlertProvider';
+import { useAlert } from '@/frontend/components/AlertProvider';
 import { type HeaderToolbarAction, TabRootHeader } from '@/frontend/components/headers';
 import {
   areAllSelected,
@@ -39,7 +39,7 @@ export default function AssistantListScreen() {
   const router = useRouter();
   const { assistants, isLoading } = useAssistantsApi();
   const { deleteAssistant, deleteAssistants } = useAssistantMutations();
-  const { showConfirmation, showMessage } = useAppAlert();
+  const { alert } = useAlert();
   const { closeOpen, notifyClose, notifyWillOpen } = useExclusiveSwipeable();
   const setBottomTabBarHidden = useSetBottomTabBarHidden();
   const bottomInset = useMessageListBottomInset();
@@ -147,19 +147,19 @@ export default function AssistantListScreen() {
   );
   const requestDeleteAssistant = useCallback(
     (assistant: Assistant) => {
-      showConfirmation({
+      alert.confirm({
         confirmLabel: t('common.delete'),
         description: t('assistant.delete.message', { name: assistant.name }),
         role: 'destructive',
         title: t('assistant.delete.title'),
         onConfirm: () => {
           void deleteAssistant(assistant.id).catch(() => {
-            showMessage({ title: t('assistant.toast.deleteFailed') });
+            alert.show({ title: t('assistant.toast.deleteFailed') });
           });
         },
       });
     },
-    [deleteAssistant, showConfirmation, showMessage, t],
+    [alert, deleteAssistant, t],
   );
   const deleteSelectedAssistants = useCallback(async () => {
     const ids = [...selectedIds];
@@ -172,24 +172,24 @@ export default function AssistantListScreen() {
     try {
       await deleteAssistants(ids);
     } catch {
-      showMessage({ title: t('assistant.selection.deleteFailed') });
+      alert.show({ title: t('assistant.selection.deleteFailed') });
     } finally {
       setPendingDeletionIds(new Set());
     }
-  }, [deleteAssistants, exitEditing, selectedIds, showMessage, t]);
+  }, [alert, deleteAssistants, exitEditing, selectedIds, t]);
   const requestDeleteSelectedAssistants = useCallback(() => {
     if (selectedIds.size === 0) {
       return;
     }
 
-    showConfirmation({
+    alert.confirm({
       confirmLabel: t('common.delete'),
       description: t('assistant.selection.deleteMessage', { count: selectedIds.size }),
       onConfirm: deleteSelectedAssistants,
       role: 'destructive',
       title: t('assistant.selection.deleteTitle'),
     });
-  }, [deleteSelectedAssistants, selectedIds.size, showConfirmation, t]);
+  }, [alert, deleteSelectedAssistants, selectedIds.size, t]);
   const scrollContentStyle = useMemo(
     () => ({ paddingBottom: bottomInset, paddingHorizontal: 8 }),
     [bottomInset],
@@ -369,7 +369,7 @@ function AssistantListRow({
         >
           <View className="relative min-w-0 flex-1 flex-row items-center gap-2 py-2 pl-2">
             <Animated.View
-              className="absolute inset-0 bg-settings-grouped-surface"
+              className="absolute inset-0 bg-secondary"
               pointerEvents="none"
               style={pressedBackgroundStyle}
             />
@@ -398,7 +398,9 @@ function AssistantListRow({
                       : 'size-6 items-center justify-center rounded-full border-2 border-border-strong'
                   }
                 >
-                  {isSelected ? <CheckIcon className="size-4 text-white" strokeWidth={3} /> : null}
+                  {isSelected ? (
+                    <CheckIcon className="size-4 text-primary-foreground" strokeWidth={3} />
+                  ) : null}
                 </View>
               </Animated.View>
             ) : null}
@@ -439,10 +441,10 @@ function DeleteAction({ drag, label, onPress }: DeleteActionProps) {
       <Pressable
         accessibilityLabel={label}
         accessibilityRole="button"
-        className="w-16 flex-1 items-center justify-center bg-danger active:opacity-80"
+        className="w-16 flex-1 items-center justify-center bg-destructive active:opacity-80"
         onPress={onPress}
       >
-        <Trash2Icon className="size-5 text-danger-foreground" strokeWidth={2} />
+        <Trash2Icon className="size-5 text-destructive-foreground" strokeWidth={2} />
       </Pressable>
     </Animated.View>
   );
@@ -459,15 +461,15 @@ function AssistantEmptyState({
 
   return (
     <View className="items-center justify-center gap-4 px-8 py-16">
-      <View className="size-14 items-center justify-center rounded-full bg-settings-grouped-surface">
-        <BotIcon className="size-7 text-default-foreground" strokeWidth={2} />
+      <View className="size-14 items-center justify-center rounded-full bg-secondary">
+        <BotIcon className="size-7 text-foreground" strokeWidth={2} />
       </View>
       <View className="items-center gap-1">
         <Text className="text-center font-semibold text-foreground text-lg">
           {isLoading ? t('assistant.list.loading') : t('assistant.list.emptyTitle')}
         </Text>
         {!isLoading ? (
-          <Text className="text-center text-default-foreground text-sm">
+          <Text className="text-center text-foreground text-sm">
             {t('assistant.list.emptyDescription')}
           </Text>
         ) : null}
