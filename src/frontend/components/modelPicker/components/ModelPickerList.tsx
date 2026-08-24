@@ -1,30 +1,32 @@
+import CheckIcon from '@cherrystudio/app-icons/icons/check';
 import { cn } from '@cherrystudio/ui/utils';
 import {
   LegendList,
   type LegendListRef,
   type LegendListRenderItemProps,
 } from '@legendapp/list/react-native';
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ModelAvatar } from '@/frontend/components/avatar';
 
-import { getModelPickerRowTags, type ModelPickerModelItem } from '../utils/modelPickerData';
+import type { ModelPickerModelItem } from '../utils/modelPickerData';
+import {
+  buildModelPickerFastScrollNavigation,
+  MIN_MODEL_PICKER_FAST_SCROLL_MODEL_COUNT,
+} from '../utils/modelPickerFastScroll';
 import type { ModelPickerListItem } from '../utils/modelPickerListItems';
-import { ModelPickerTagChip } from './ModelPickerTagChip';
+import { ModelPickerFastScroller } from './ModelPickerFastScroller';
 
-/** `py-2` around the tallest thing in a row, which is the 26 avatar. */
-const modelPickerEstimatedItemSize = 42;
+const modelPickerEstimatedItemSize = 48;
 
 type ModelPickerListProps = {
   emptyText?: string;
-  hasMoreItems?: boolean;
   isLoading?: boolean;
   /** Whether the picker is on screen; it scrolls to the selection once per showing. */
   isOpen?: boolean;
   listItems: readonly ModelPickerListItem[];
   loadingText?: string;
-  onEndReached?: () => void;
   onSelect: (item: ModelPickerModelItem) => void;
   selectedModelId: string | null;
 };
@@ -35,22 +37,34 @@ type ModelPickerListExtraData = {
 
 /**
  * Every model on the device, grouped by provider. Drawn for both surfaces that
- * pick one — the sheet the composer opens and the pushed screen the model
+ * pick one — the drawer the composer opens and the pushed screen the model
  * settings use — so the two cannot drift apart.
  */
 export function ModelPickerList({
   emptyText,
-  hasMoreItems = false,
   isLoading = false,
   isOpen = false,
   listItems,
   loadingText,
-  onEndReached,
   onSelect,
   selectedModelId,
 }: ModelPickerListProps) {
   const listRef = useRef<LegendListRef>(null);
+  const navigationFrameRef = useRef<number | null>(null);
+  const pendingNavigationIndexRef = useRef<number | null>(null);
   const hasScrolledToSelectedRef = useRef(false);
+  const [activeAnchorKey, setActiveAnchorKey] = useState<string | null>(null);
+  const fastScrollNavigation = useMemo(
+    () => buildModelPickerFastScrollNavigation(listItems),
+    [listItems],
+  );
+  const { anchorIndexByListIndex, anchors: fastScrollAnchors, modelCount } = fastScrollNavigation;
+  const isFastScrollerVisible =
+    modelCount >= MIN_MODEL_PICKER_FAST_SCROLL_MODEL_COUNT && fastScrollAnchors.length > 1;
+  const storedActiveAnchorIndex = fastScrollAnchors.findIndex(
+    (anchor) => anchor.key === activeAnchorKey,
+  );
+  const activeAnchorIndex = storedActiveAnchorIndex >= 0 ? storedActiveAnchorIndex : 0;
   const selectedRowIndex = useMemo(() => {
     if (!selectedModelId) {
       return -1;
@@ -61,7 +75,7 @@ export function ModelPickerList({
     );
   }, [listItems, selectedModelId]);
   // Scroll to the selected model once per open. Guarding on a ref (rather than
-  // re-running whenever the list grows) keeps lazy-loading or manual scrolling
+  // re-running whenever the list changes) keeps filtering or manual scrolling
   // from yanking the user back to the selected row.
   useEffect(() => {
     if (!isOpen) {
@@ -84,6 +98,14 @@ export function ModelPickerList({
 
     return () => cancelAnimationFrame(frame);
   }, [isOpen, selectedRowIndex]);
+  useEffect(
+    () => () => {
+      if (navigationFrameRef.current !== null) {
+        cancelAnimationFrame(navigationFrameRef.current);
+      }
+    },
+    [],
+  );
   const listExtraData = useMemo<ModelPickerListExtraData>(
     () => ({ selectedModelId }),
     [selectedModelId],
@@ -106,52 +128,97 @@ export function ModelPickerList({
   );
   const keyExtractor = useCallback((item: ModelPickerListItem) => item.key, []);
   const getItemType = useCallback((item: ModelPickerListItem) => item.type, []);
-  const handleEndReached = useCallback(() => {
-    if (!hasMoreItems) {
-      return;
-    }
+  const handleFirstVisibleItemChanged = useCallback(
+    ({ index }: { index: number }) => {
+      const anchorIndex = listRef.current?.getState().isAtEnd
+        ? anchorIndexByListIndex[anchorIndexByListIndex.length - 1]
+        : anchorIndexByListIndex[index];
+      const anchor = anchorIndex === undefined ? undefined : fastScrollAnchors[anchorIndex];
+      if (anchor) {
+        setActiveAnchorKey((current) => (current === anchor.key ? current : anchor.key));
+      }
+    },
+    [anchorIndexByListIndex, fastScrollAnchors],
+  );
+  const handleFastScrollNavigate = useCallback(
+    (anchorIndex: number) => {
+      const anchor = fastScrollAnchors[anchorIndex];
+      if (!anchor) {
+        return;
+      }
 
-    onEndReached?.();
-  }, [hasMoreItems, onEndReached]);
+      setActiveAnchorKey(anchor.key);
+      pendingNavigationIndexRef.current = anchor.listIndex;
+      if (navigationFrameRef.current !== null) {
+        return;
+      }
 
+      navigationFrameRef.current = requestAnimationFrame(() => {
+        navigationFrameRef.current = null;
+        const listIndex = pendingNavigationIndexRef.current;
+        pendingNavigationIndexRef.current = null;
+        if (listIndex !== null) {
+          void listRef.current?.scrollToIndex({
+            animated: false,
+            index: listIndex,
+            viewPosition: 0,
+          });
+        }
+      });
+    },
+    [fastScrollAnchors],
+  );
   if (listItems.length === 0) {
     return (
-      <View className="px-4 pb-5 pt-3">
-        <View className="min-h-12 items-center justify-center rounded-xl bg-secondary px-4 py-4">
-          <Text className="text-base text-foreground">{isLoading ? loadingText : emptyText}</Text>
-        </View>
+      <View className="flex-1 items-center justify-center px-6 py-8">
+        <Text className="text-center text-base text-muted-foreground">
+          {isLoading ? loadingText : emptyText}
+        </Text>
       </View>
     );
   }
 
   return (
-    <LegendList
-      ref={listRef}
-      contentContainerStyle={styles.listContentContainer}
-      data={listItems}
-      drawDistance={320}
-      estimatedItemSize={modelPickerEstimatedItemSize}
-      extraData={listExtraData}
-      getItemType={getItemType}
-      keyboardDismissMode="on-drag"
-      keyboardShouldPersistTaps="handled"
-      keyExtractor={keyExtractor}
-      maintainVisibleContentPosition={false}
-      nestedScrollEnabled
-      onEndReached={handleEndReached}
-      onEndReachedThreshold={0.15}
-      recycleItems
-      renderItem={renderItem}
-      showsVerticalScrollIndicator={false}
-      style={styles.list}
-    />
+    <View style={styles.list}>
+      <LegendList
+        ref={listRef}
+        contentContainerStyle={[
+          styles.listContentContainer,
+          isFastScrollerVisible ? styles.listContentContainerWithFastScroller : undefined,
+        ]}
+        data={listItems}
+        drawDistance={320}
+        estimatedItemSize={modelPickerEstimatedItemSize}
+        extraData={listExtraData}
+        getItemType={getItemType}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        keyExtractor={keyExtractor}
+        maintainVisibleContentPosition={false}
+        nestedScrollEnabled
+        onFirstVisibleItemChanged={
+          isFastScrollerVisible ? handleFirstVisibleItemChanged : undefined
+        }
+        recycleItems
+        renderItem={renderItem}
+        showsVerticalScrollIndicator={false}
+        style={styles.list}
+      />
+      {isFastScrollerVisible ? (
+        <ModelPickerFastScroller
+          activeIndex={activeAnchorIndex}
+          anchors={fastScrollAnchors}
+          onNavigate={handleFastScrollNavigate}
+        />
+      ) : null}
+    </View>
   );
 }
 
 function ModelPickerGroupHeader({ isFirstGroup, title }: { isFirstGroup: boolean; title: string }) {
   return (
-    <View className={cn('flex-row items-center gap-2 px-2 pb-1', !isFirstGroup && 'mt-3')}>
-      <Text className="text-foreground text-lg">{title}</Text>
+    <View className={cn('px-6', isFirstGroup ? 'mt-2' : 'mt-4')}>
+      <Text className="text-base text-muted-foreground">{title}</Text>
     </View>
   );
 }
@@ -168,38 +235,21 @@ const ModelPickerRow = memo(function ModelPickerRow({
   const handleSelect = useCallback(() => {
     onSelect(item);
   }, [item, onSelect]);
-  const tags = getModelPickerRowTags(item.model);
-
   return (
     <Pressable
       accessibilityLabel={item.model.name}
       accessibilityRole="button"
       accessibilityState={{ selected: isSelected }}
-      className={cn(
-        // `px-2` against the list's own 8, so the fill runs to within 8 of the
-        // sheet edge while the text keeps the 16 the group headings are set to.
-        // The fill is the only mark of the selection — it reads at a glance
-        // down a long list in a way a tick at the far end of the row does not.
-        'flex-row items-center gap-3 rounded-xl px-2 py-2 active:opacity-60',
-        isSelected && 'bg-secondary',
-      )}
+      className="min-h-12 flex-row items-center gap-3 px-6 active:opacity-60"
       onPress={handleSelect}
     >
-      <ModelAvatar model={item.model} provider={item.provider} />
-      {/* The one part of the row that gives, so the capabilities keep their
-          natural width and a long model id ellipsizes instead. */}
-      <View className="min-w-0 flex-1 flex-row items-center gap-2">
-        <Text className="min-w-0 shrink text-base text-foreground" numberOfLines={1}>
+      <ModelAvatar model={item.model} provider={item.provider} size={32} />
+      <View className="min-w-0 flex-1">
+        <Text className="text-base text-foreground" numberOfLines={2}>
           {item.model.name}
         </Text>
       </View>
-      {tags.length > 0 ? (
-        <View className="flex-row items-center gap-1">
-          {tags.map((tag) => (
-            <ModelPickerTagChip key={`${item.modelId}:${tag}`} tag={tag} />
-          ))}
-        </View>
-      ) : null}
+      {isSelected ? <CheckIcon className="size-5 shrink-0 text-success" /> : null}
     </Pressable>
   );
 });
@@ -208,12 +258,11 @@ const styles = StyleSheet.create({
   list: {
     flex: 1,
   },
-  // 8 rather than the 16 everything here lines up on: the rows and the group
-  // headings carry the other 8 themselves, which is what leaves the selected
-  // row's fill room to sit outside its own text.
   listContentContainer: {
-    paddingBottom: 20,
-    paddingHorizontal: 8,
-    paddingTop: 12,
+    gap: 4,
+    paddingBottom: 24,
+  },
+  listContentContainerWithFastScroller: {
+    paddingRight: 32,
   },
 });

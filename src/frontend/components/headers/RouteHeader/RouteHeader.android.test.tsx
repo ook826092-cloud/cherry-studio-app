@@ -26,7 +26,7 @@ jest.mock('expo-router/react-navigation', () => ({
     selector({ index: mockNavigationIndex }),
 }));
 
-jest.mock('@cherrystudio/app-icons/icons/chevron-left', () => () => null);
+jest.mock('@cherrystudio/app-icons/icons/arrow-left', () => () => null);
 jest.mock('@cherrystudio/app-icons/icons/menu', () => () => null);
 jest.mock('@cherrystudio/app-icons/icons/x', () => () => null);
 
@@ -82,6 +82,7 @@ describe('RouteHeader.android', () => {
 
     expect(getOptions().headerRight).toEqual(expect.any(Function));
     expect(getOptions().headerTitle).toEqual(expect.any(Function));
+    expect(getOptions().headerTitleAlign).toBe('center');
     expect(getOptions().title).toBe('');
 
     await renderRouteHeader(
@@ -93,6 +94,7 @@ describe('RouteHeader.android', () => {
 
     expect(getOptions().headerRight).toEqual(expect.any(Function));
     expect(getOptions().headerTitle).toBeUndefined();
+    expect(getOptions().headerTitleAlign).toBe('center');
     expect(getOptions().title).toBe('Config');
 
     await renderRouteHeader(<RouteHeader title="Config" />);
