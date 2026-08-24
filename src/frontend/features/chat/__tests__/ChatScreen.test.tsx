@@ -2,25 +2,30 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { ChatScreen } from '../ChatScreen';
 
-type MockChatWorkspaceProps = { isPreview: boolean; topicId: string };
+const mockHandleInputHeightChange = jest.fn();
+const mockInputHeightShared = { value: 122 };
+let chatComposerProps: Record<string, unknown> | undefined;
+let chatWorkspaceProps: Record<string, unknown> | undefined;
 
-const mockChatWorkspace = jest.fn((_props: MockChatWorkspaceProps) => null);
-let mockIsPreview = false;
+jest.mock('@cherrystudio/ui/components', () => ({
+  useComposerDockLayout: () => ({
+    contentBottomInset: 130,
+    handleInputHeightChange: mockHandleInputHeightChange,
+    inputHeight: 122,
+    inputHeightShared: mockInputHeightShared,
+    keyboardOffset: 26,
+  }),
+}));
 
 jest.mock('expo-router', () => ({
-  useIsPreview: () => mockIsPreview,
-  useLocalSearchParams: () => ({ topicId: 'topic-1' }),
+  useIsPreview: () => false,
+  useLocalSearchParams: () => ({ assistantId: 'assistant-1', topicId: 'topic-1' }),
 }));
 
 jest.mock('@/frontend/components/headers', () => ({ MainHeader: () => null }));
 
 jest.mock('@/frontend/hooks/chat', () => ({
-  useMessages: () => ({
-    isLoadingInitial: false,
-    isLoadingOlder: false,
-    loadOlder: jest.fn(),
-    messages: [],
-  }),
+  useMessages: () => ({ isLoadingInitial: false, messages: [] }),
   useTopic: () => ({ data: { id: 'topic-1' }, isError: false, isLoading: false }),
 }));
 
@@ -28,37 +33,50 @@ jest.mock('@/shared/core/logger/LoggerService', () => ({
   loggerService: { withContext: () => ({ debug: jest.fn() }) },
 }));
 
-jest.mock('../workspace', () => ({
-  ChatWorkspace: (props: MockChatWorkspaceProps) => mockChatWorkspace(props),
+jest.mock('@/shared/devBench/layoutBenchProbe', () => ({
+  armLayoutBenchProbe: jest.fn(),
+  LAYOUT_BENCH_ASSISTANT_ID: 'benchmark-assistant',
 }));
 
-jest.mock('../NewTopicScreen', () => ({ NewTopicScreen: () => null }));
+jest.mock('../workspace', () => ({
+  ChatComposer: (props: Record<string, unknown>) => {
+    chatComposerProps = props;
+    return null;
+  },
+  ChatEmptyState: () => null,
+  ChatWorkspace: (props: Record<string, unknown>) => {
+    chatWorkspaceProps = props;
+    return null;
+  },
+}));
 
-describe('ChatScreen preview', () => {
+describe('ChatScreen composer dock wiring', () => {
   let renderer: ReactTestRenderer | undefined;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    mockIsPreview = false;
+    chatComposerProps = undefined;
+    chatWorkspaceProps = undefined;
   });
 
-  afterEach(async () => {
-    await act(async () => renderer?.unmount());
+  afterEach(() => {
+    act(() => renderer?.unmount());
     renderer = undefined;
   });
 
-  it.each([
-    [false, 'normal navigation'],
-    [true, 'a link preview'],
-  ])('passes isPreview=%s during %s', async (isPreview) => {
-    mockIsPreview = isPreview;
-
-    await act(async () => {
+  it('shares CherryUI dock measurements with the workspace and composer', () => {
+    act(() => {
       renderer = create(<ChatScreen />);
     });
 
-    expect(mockChatWorkspace.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ isPreview, topicId: 'topic-1' }),
-    );
+    expect(chatWorkspaceProps).toMatchObject({
+      bottomAccessoryHeight: mockInputHeightShared,
+      contentBottomInset: 130,
+      keyboardOffset: 26,
+    });
+    expect(chatComposerProps).toMatchObject({
+      assistantId: 'assistant-1',
+      onHeightChange: mockHandleInputHeightChange,
+      topicId: 'topic-1',
+    });
   });
 });

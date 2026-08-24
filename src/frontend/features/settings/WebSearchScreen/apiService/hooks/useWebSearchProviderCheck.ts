@@ -1,15 +1,14 @@
+import { useAlert, useToast } from '@cherrystudio/ui/components';
+import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { useBackendModule } from '@/frontend/data';
+import type { WebSearchProviderPreset } from '@/shared/data/presets/webSearchProviders';
 import type {
   WebSearchCapability,
   WebSearchProvider,
   WebSearchProviderOverride,
-} from '@cherrystudio/universal/data/preference';
-import type { WebSearchProviderPreset } from '@cherrystudio/universal/data/presets/webSearchProviders';
-import { useToast } from 'heroui-native/toast';
-import { useEffect, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-
-import { useAlert } from '@/frontend/components/AlertProvider';
-import { useBackendModule } from '@/frontend/data';
+} from '@/shared/data/types/webSearch';
 
 export function useWebSearchProviderCheck(
   provider: WebSearchProviderPreset,

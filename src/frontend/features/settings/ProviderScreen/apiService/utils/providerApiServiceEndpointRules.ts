@@ -1,11 +1,12 @@
 import { ENDPOINT_TYPE } from '@cherrystudio/provider-registry';
-import type { EndpointType } from '@cherrystudio/universal/data/types/model';
+
+import type { EndpointType } from '@/shared/data/types/model';
 import type {
   AuthType,
   EndpointConfig,
   EndpointConfigs,
   Provider,
-} from '@cherrystudio/universal/data/types/provider';
+} from '@/shared/data/types/provider';
 
 export const CUSTOM_PROVIDER_TEXT_ENDPOINT_TYPES = [
   ENDPOINT_TYPE.OPENAI_CHAT_COMPLETIONS,
@@ -26,7 +27,6 @@ export const CONFIGURABLE_ENDPOINT_TYPES = [
 
 export type CustomProviderTextEndpoint = (typeof CUSTOM_PROVIDER_TEXT_ENDPOINT_TYPES)[number];
 export type CustomProviderEndpoint = (typeof CONFIGURABLE_ENDPOINT_TYPES)[number];
-export type CustomProviderEndpointUrls = Partial<Record<CustomProviderEndpoint, string>>;
 
 export type CustomProviderCreationPayload = {
   defaultChatEndpoint: CustomProviderTextEndpoint;
@@ -103,8 +103,8 @@ export function buildCustomProviderCreationPayload({
   endpointUrls,
   preferredChatEndpoint,
 }: {
-  endpointUrls: CustomProviderEndpointUrls;
-  preferredChatEndpoint?: CustomProviderTextEndpoint;
+  endpointUrls: Partial<Record<EndpointType, string>>;
+  preferredChatEndpoint?: EndpointType;
 }): CustomProviderCreationPayload {
   const endpointConfigs: EndpointConfigs = {};
 
@@ -116,7 +116,9 @@ export function buildCustomProviderCreationPayload({
   }
 
   const defaultChatEndpoint =
-    (preferredChatEndpoint && endpointUrls[preferredChatEndpoint]?.trim()
+    (preferredChatEndpoint &&
+    isCustomProviderTextEndpointType(preferredChatEndpoint) &&
+    endpointUrls[preferredChatEndpoint]?.trim()
       ? preferredChatEndpoint
       : CUSTOM_PROVIDER_TEXT_ENDPOINT_TYPES.find((endpointType) =>
           endpointUrls[endpointType]?.trim(),
@@ -126,7 +128,7 @@ export function buildCustomProviderCreationPayload({
 }
 
 export function findInvalidCustomProviderEndpointUrl(
-  endpointUrls: CustomProviderEndpointUrls,
+  endpointUrls: Partial<Record<EndpointType, string>>,
 ): CustomProviderEndpoint | null {
   for (const endpointType of CONFIGURABLE_ENDPOINT_TYPES) {
     const value = endpointUrls[endpointType]?.trim();

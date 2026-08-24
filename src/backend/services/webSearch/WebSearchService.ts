@@ -1,24 +1,20 @@
+import { BaseService, DependsOn, Injectable } from '@/backend/core/lifecycle';
+import type { PreferenceService } from '@/backend/data/PreferenceService';
+import { loggerService } from '@/shared/core/logger/LoggerService';
 import type {
   WebSearchCapability,
   WebSearchProvider,
-} from '@cherrystudio/universal/data/preference';
-import type {
   WebSearchCheckProviderRequest,
   WebSearchCheckProviderResponse,
   WebSearchExecutionConfig,
   WebSearchFetchUrlsRequest,
   WebSearchResponse,
   WebSearchSearchKeywordsRequest,
-} from '@cherrystudio/universal/data/types/webSearch';
-
-import { BaseService, DependsOn, Injectable } from '@/backend/core/lifecycle';
-import type { PreferenceService } from '@/backend/data/PreferenceService';
-import { loggerService } from '@/shared/core/logger/LoggerService';
+} from '@/shared/data/types/webSearch';
 
 import { postProcessWebSearchResponse } from './postProcessing';
 import type { WebSearchProviderDriver } from './providers/factory';
 import { createWebSearchProvider } from './providers/factory';
-import { filterWebSearchResponseWithBlacklist } from './utils/blacklist';
 import { getProviderForCapability, getRuntimeConfig } from './utils/config';
 import { isAbortError } from './utils/errors';
 import { normalizeWebSearchKeywords, normalizeWebSearchUrls } from './utils/input';
@@ -133,14 +129,7 @@ export class WebSearchService extends BaseService {
       results: successfulSearches.flatMap((item) => item.value.results),
     };
 
-    const filteredResponse = filterWebSearchResponseWithBlacklist(
-      mergedResponse,
-      context.runtimeConfig.excludeDomains,
-    );
-    const postProcessed = await postProcessWebSearchResponse(
-      filteredResponse,
-      context.runtimeConfig,
-    );
+    const postProcessed = await postProcessWebSearchResponse(mergedResponse, context.runtimeConfig);
 
     return postProcessed.response;
   }

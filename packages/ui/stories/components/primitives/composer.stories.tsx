@@ -1,15 +1,17 @@
-import { Composer, type ComposerProps } from '@cherrystudio/ui/components';
-import type { Meta, StoryObj } from '@storybook/react-native';
+import CameraIcon from '@cherrystudio/app-icons/icons/camera';
+import FileIcon from '@cherrystudio/app-icons/icons/file';
+import GlobeIcon from '@cherrystudio/app-icons/icons/globe';
+import ImagesIcon from '@cherrystudio/app-icons/icons/images';
+import SlidersHorizontalIcon from '@cherrystudio/app-icons/icons/sliders-horizontal';
+import SparklesIcon from '@cherrystudio/app-icons/icons/sparkles';
+import XIcon from '@cherrystudio/app-icons/icons/x';
 import {
-  CameraIcon,
-  FileIcon,
-  GlobeIcon,
-  ImagesIcon,
-  SlidersHorizontalIcon,
-  SparklesIcon,
-  XIcon,
-} from 'lucide-uniwind/png';
-import { type ReactNode, useState } from 'react';
+  Composer,
+  type ComposerInputHandle,
+  type ComposerProps,
+} from '@cherrystudio/ui/components';
+import type { Meta, StoryObj } from '@storybook/react-native';
+import { type ReactNode, type RefObject, useRef, useState } from 'react';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { fn } from 'storybook/test';
 import { ScopedTheme } from 'uniwind';
@@ -57,7 +59,7 @@ function AttachmentStrip({
             hitSlop={8}
             onPress={() => onRemove(attachment.id)}
           >
-            <XIcon className="size-3.5 text-white" strokeWidth={2.5} />
+            <XIcon className="size-3.5 text-white" />
           </Pressable>
         </View>
       ))}
@@ -68,8 +70,19 @@ function AttachmentStrip({
 type PreviewState = {
   attach: () => void;
   attachments: readonly StoryAttachment[];
+  /** Handed back out because the field is the caller's to place, and `mention` needs it. */
+  inputRef: RefObject<ComposerInputHandle | null>;
+  /** Inserts a tool mention at the caret, the way a real ＋ menu row would. */
+  mention: () => void;
   remove: (id: string) => void;
   value: string;
+};
+
+// A mention is a link, so it is styled by what its URL means rather than by
+// where it sits. `^tool:` is this story's scheme for one.
+const markdownStyle = {
+  link: { color: '#ff5757', underline: false },
+  linkVariants: { '^tool:': { color: '#ff5757', underline: false } },
 };
 
 type ThemePreviewProps = {
@@ -82,12 +95,36 @@ type ThemePreviewProps = {
 };
 
 /**
+ * The switch row. Holds its own state so the story shows the setting persisting
+ * across opens — the row closes the menu like any other, so the only way to see
+ * where it landed is to reopen it.
+ */
+function WebSearchToggleRow() {
+  const [enabled, setEnabled] = useState(false);
+
+  return (
+    <Composer.Menu.Toggle
+      icon={<GlobeIcon className="size-5 text-foreground" />}
+      label="Web search"
+      onValueChange={setEnabled}
+      value={enabled}
+    />
+  );
+}
+
+/**
  * Owns the composer's controlled state so the story exercises the real flow:
  * type, attach, send (which clears), and the send/stop flip.
  */
 function ThemePreview({ args, children, hint, label, theme }: ThemePreviewProps) {
   const [value, setValue] = useState(args.value);
   const [attachments, setAttachments] = useState<readonly StoryAttachment[]>([]);
+  const inputRef = useRef<ComposerInputHandle>(null);
+
+  const mention = () => {
+    inputRef.current?.insertLink('Create image', 'tool://create-image');
+    inputRef.current?.insertText(' ');
+  };
 
   const attach = () => {
     const next = sampleAttachments.find(
@@ -123,7 +160,7 @@ function ThemePreview({ args, children, hint, label, theme }: ThemePreviewProps)
           }}
           value={value}
         >
-          {children?.({ attach, attachments, remove, value })}
+          {children?.({ attach, attachments, inputRef, mention, remove, value })}
         </Composer>
         <Text className="text-sm text-muted-foreground">{hint}</Text>
       </View>
@@ -194,43 +231,55 @@ export const Composed: Story = {
     bothThemes((theme) => (
       <ThemePreview
         args={args}
-        hint="＋ to attach, sliders for a plain tool, the pill for one that shows its setting."
+        hint="＋ to attach or drop in a mention, sliders for a plain tool, the pill for one that shows its setting."
         key={theme.value}
         label={theme.label}
         theme={theme.value}
       >
-        {({ attach, attachments, remove }) => (
+        {({ attach, attachments, inputRef, mention, remove }) => (
           <>
             <Composer.Collapsible>
               {attachments.length > 0 ? (
                 <AttachmentStrip attachments={attachments} onRemove={remove} />
               ) : null}
             </Composer.Collapsible>
-            <Composer.Input placeholder={args.placeholder} />
+            <Composer.Input
+              markdownStyle={markdownStyle}
+              placeholder={args.placeholder}
+              ref={inputRef}
+            />
             <Composer.Toolbar>
               <Composer.Menu accessibilityLabel="Add attachment">
                 <Composer.Menu.Item
-                  icon={<CameraIcon className="size-5 text-foreground" strokeWidth={2} />}
+                  icon={<CameraIcon className="size-5 text-foreground" />}
                   label="Camera"
                   onPress={attach}
                 />
                 <Composer.Menu.Item
-                  icon={<ImagesIcon className="size-5 text-foreground" strokeWidth={2} />}
+                  icon={<ImagesIcon className="size-5 text-foreground" />}
                   label="Photos"
                   onPress={attach}
                 />
                 <Composer.Menu.Item
-                  icon={<FileIcon className="size-5 text-foreground" strokeWidth={2} />}
+                  icon={<FileIcon className="size-5 text-foreground" />}
                   label="File"
                   onPress={attach}
                 />
+                {/* Nothing is written into `value` here: the row hands the
+                    field a link, and the field hands back the Markdown for it. */}
+                <Composer.Menu.Item
+                  icon={<SparklesIcon className="size-5 text-foreground" />}
+                  label="Create image"
+                  onPress={mention}
+                />
+                <WebSearchToggleRow />
               </Composer.Menu>
               <Composer.Action accessibilityLabel="Settings" onPress={fn()}>
-                <SlidersHorizontalIcon className="size-6 text-foreground" strokeWidth={2} />
+                <SlidersHorizontalIcon className="size-6 text-foreground" />
               </Composer.Action>
               <Composer.Pill
                 accessibilityLabel="Change model"
-                icon={<SparklesIcon className="size-4 text-foreground" strokeWidth={2} />}
+                icon={<SparklesIcon className="size-4 text-foreground" />}
                 onPress={fn()}
               >
                 <Text
@@ -268,7 +317,7 @@ export const StatusRow: Story = {
             <Composer.Collapsible>
               {value.length > 0 ? (
                 <View className="flex-row items-center gap-2 self-start rounded-full bg-primary/10 px-3 py-1.5">
-                  <GlobeIcon className="size-4 text-primary" strokeWidth={2} />
+                  <GlobeIcon className="size-4 text-primary" />
                   <Text className="text-sm text-primary">Searching the web…</Text>
                 </View>
               ) : null}

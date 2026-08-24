@@ -1,5 +1,4 @@
-import type { WebSearchProvider } from '@cherrystudio/universal/data/preference';
-import type { WebSearchExecutionConfig } from '@cherrystudio/universal/data/types/webSearch';
+import type { WebSearchProvider, WebSearchExecutionConfig } from '@/shared/data/types/webSearch';
 
 import { ApiKeyRotationState } from '../../../utils/provider';
 import queritResponse from '../../__tests__/fixtures/querit-response.json';
@@ -7,7 +6,6 @@ import { QueritProvider } from '../QueritProvider';
 
 const runtimeConfig: WebSearchExecutionConfig = {
   maxResults: 4,
-  excludeDomains: [],
   compression: { method: 'none', cutoffLimit: 2000 },
 };
 
@@ -49,22 +47,6 @@ describe('QueritProvider', () => {
           sourceInput: 'hello',
         },
       ],
-    });
-  });
-
-  test('sends site exclusion filters only when excludeDomains is non-empty', async () => {
-    const fetchMock = mockJsonResponse(queritResponse);
-
-    const provider = new QueritProvider(createProvider(), new ApiKeyRotationState());
-    await provider.searchKeywords('hello', {
-      ...runtimeConfig,
-      excludeDomains: ['example.com'],
-    });
-
-    expect(readRequestBody(fetchMock)).toEqual({
-      query: 'hello',
-      count: 4,
-      filters: { sites: { exclude: ['example.com'] } },
     });
   });
 

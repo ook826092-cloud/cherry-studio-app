@@ -101,6 +101,12 @@ describe('Button', () => {
     {
       iconClassName: 'size-4',
       labelClassName: 'text-sm',
+      rootClassNames: ['gap-1', 'px-2', 'py-1.5'],
+      size: 'xs',
+    },
+    {
+      iconClassName: 'size-4',
+      labelClassName: 'text-sm',
       rootClassNames: ['gap-1.5', 'px-3', 'py-2'],
       size: 'sm',
     },
@@ -141,6 +147,16 @@ describe('Button', () => {
     );
     expect(icon.props.className).not.toContain('size-5');
     expect(icon.props.className).not.toContain('text-foreground');
+  });
+
+  test('keeps the xs visual density inside a usable touch target', () => {
+    const tree = render(null, {
+      accessibilityLabel: 'More',
+      icon: <View testID="icon" />,
+      size: 'xs',
+    });
+
+    expect(findPressable(tree).props.hitSlop).toBe(8);
   });
 
   test('uses content-driven square padding for an icon-only button', () => {
@@ -267,25 +283,5 @@ describe('Button', () => {
 
     expect(pressable.props.disabled).toBe(true);
     expect(pressable.props.accessibilityState).toEqual({ checked: true, disabled: true });
-  });
-
-  test('forwards Pressable props and style', () => {
-    const onPress = jest.fn();
-    const style = { marginTop: 12 };
-    const pressable = findPressable(
-      render('Continue', {
-        accessibilityHint: 'Moves to the next step',
-        hitSlop: 8,
-        onPress,
-        style,
-        testID: 'continue-button',
-      }),
-    );
-
-    expect(pressable.props.accessibilityHint).toBe('Moves to the next step');
-    expect(pressable.props.hitSlop).toBe(8);
-    expect(pressable.props.onPress).toBe(onPress);
-    expect(pressable.props.style).toBe(style);
-    expect(pressable.props.testID).toBe('continue-button');
   });
 });

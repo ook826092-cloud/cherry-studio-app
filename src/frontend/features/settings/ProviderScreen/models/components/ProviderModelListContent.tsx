@@ -1,8 +1,9 @@
-import type { Model, UniqueModelId } from '@cherrystudio/universal/data/types/model';
-import type { Provider } from '@cherrystudio/universal/data/types/provider';
 import { LegendList, type LegendListRenderItemProps } from '@legendapp/list/react-native';
 import { memo, type ReactElement, useCallback, useMemo } from 'react';
 import { StyleSheet } from 'react-native';
+
+import type { Model, UniqueModelId } from '@/shared/data/types/model';
+import type { Provider } from '@/shared/data/types/provider';
 
 import { ProviderModelRow, providerModelRowEstimatedHeight } from './ProviderModelRow';
 
@@ -13,6 +14,16 @@ import { ProviderModelRow, providerModelRowEstimatedHeight } from './ProviderMod
 export type ProviderModelListSelection = {
   onToggleModel: (id: UniqueModelId) => void;
   selectedIds: ReadonlySet<UniqueModelId>;
+};
+
+export type ProviderModelListContentProps = {
+  isDefaultModel: (model: Model) => boolean;
+  ListEmptyComponent?: ReactElement;
+  ListHeaderComponent?: ReactElement;
+  models: Model[];
+  onScrollBeginDrag?: () => void;
+  provider: Provider | undefined;
+  selection?: ProviderModelListSelection;
 };
 
 type ProviderModelListExtraData = {
@@ -33,15 +44,7 @@ export function ProviderModelListContent({
   onScrollBeginDrag,
   provider,
   selection,
-}: {
-  isDefaultModel: (model: Model) => boolean;
-  ListEmptyComponent?: ReactElement;
-  ListHeaderComponent?: ReactElement;
-  models: Model[];
-  onScrollBeginDrag?: () => void;
-  provider: Provider | undefined;
-  selection?: ProviderModelListSelection;
-}) {
+}: ProviderModelListContentProps) {
   const extraData = useMemo<ProviderModelListExtraData>(
     () => ({
       isDefaultModel,
@@ -120,6 +123,7 @@ const ModelRow = memo(function ModelRow({
 
 const styles = StyleSheet.create({
   contentContainer: {
+    flexGrow: 1,
     paddingBottom: 96,
   },
   list: {

@@ -1,36 +1,43 @@
-import { ImageGenerationLoader } from '@cherrystudio/ui/components';
+import CheckIcon from '@cherrystudio/app-icons/icons/check';
+import ImageIcon from '@cherrystudio/app-icons/icons/image';
+import RotateCcwIcon from '@cherrystudio/app-icons/icons/rotate-ccw';
+import {
+  Button,
+  Image,
+  ImageGenerationLoader,
+  Section,
+  useAlert,
+} from '@cherrystudio/ui/components';
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { Link, useRouter } from 'expo-router';
-import { CheckIcon, ImageIcon, RotateCcwIcon } from 'lucide-uniwind/png';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
+import { ArtifactPreviewLink } from '@/frontend/components/artifactPreview';
 import {
   COMPOSER_PHOTO_SELECTION_LIMIT,
   type ComposerInitialAttachment,
   createPhotoAttachmentDraft,
 } from '@/frontend/components/composer/utils/composerAttachments';
 import {
-  useMessageListBottomInset,
-  useMessagePendingDeletionIds,
-  useMessageScope,
-  useMessageSelectionActions,
-  useMessageSelectionState,
+  useListBottomInset,
+  usePendingDeletionIds,
   useRegisterSelectionSource,
-} from '@/frontend/components/messageTabs';
-import { Image } from '@/frontend/components/nativePrimitives';
-import { PaintingZoomLink } from '@/frontend/components/navigation';
+  useSelectionActions,
+  useSelectionState,
+} from '@/frontend/components/selection';
 
 import {
   type PaintingGalleryItem,
@@ -39,7 +46,6 @@ import {
 } from './hooks/usePaintings';
 import { usePaintingSelectionSource } from './hooks/usePaintingSelectionSource';
 import { type PaintingTemplate, PaintingTemplateRow, toPaintingTemplateDraft } from './templates';
-import { distributeMasonryItems } from './utils/masonry';
 import {
   createPaintingDraftHandoff,
   type PaintingDraftHandoff,
@@ -49,20 +55,23 @@ import { loadPhotoPreviewPage, type PhotoPreview } from './utils/photoLibrary';
 const recentPhotoLimit = 12;
 const galleryGap = 6;
 const pageEdge = 16;
+const galleryContentEdge = pageEdge - galleryGap / 2;
 
 export function DrawingList() {
   const { t } = useTranslation();
   const { alert } = useAlert();
   const router = useRouter();
-  const { scope } = useMessageScope();
-  const { isEditing, selectedIds } = useMessageSelectionState();
-  const pendingDeletionIds = useMessagePendingDeletionIds('drawings');
-  const { toggleId } = useMessageSelectionActions();
-  const selectionSource = usePaintingSelectionSource(isEditing && scope === 'drawings');
+  const { isEditing, selectedIds } = useSelectionState();
+  const pendingDeletionIds = usePendingDeletionIds('drawings');
+  const { toggleId } = useSelectionActions();
+  const selectionSource = usePaintingSelectionSource(isEditing);
   useRegisterSelectionSource('drawings', selectionSource);
-  const bottomInset = useMessageListBottomInset();
+  const bottomInset = useListBottomInset();
   const { width: windowWidth } = useWindowDimensions();
-  const recentPhotos = useRecentPaintingPhotos(scope === 'drawings');
+  // Mounted means visible now that the gallery owns a whole screen, so photo
+  // access is simply always armed here.
+  const recentPhotos = useRecentPaintingPhotos(true);
+  const requestPhotoAccess = recentPhotos.requestAccess;
   const paintings = usePaintings();
   const gallery = usePaintingGalleryEntries(paintings.paintings);
   const columnWidth = (windowWidth - pageEdge * 2 - galleryGap) / 2;
@@ -73,11 +82,6 @@ export function DrawingList() {
         : gallery.items.filter((item) => !pendingDeletionIds.has(item.painting.id)),
     [gallery.items, pendingDeletionIds],
   );
-  const columns = useMemo(() => distributeMasonryItems(visibleGalleryItems), [visibleGalleryItems]);
-  const namedColumns = [
-    { items: columns[0], key: 'left' },
-    { items: columns[1], key: 'right' },
-  ] as const;
 
   const openPainting = useCallback(
     (payload: PaintingDraftHandoff) => {
@@ -114,14 +118,16 @@ export function DrawingList() {
   );
   const handleViewAllPress = useCallback(async () => {
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(false);
-      if (!permission.granted) {
+      const hasAccess = await requestPhotoAccess();
+      if (!hasAccess) {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         allowsMultipleSelection: true,
         mediaTypes: ['images'],
         orderedSelection: true,
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
         quality: 1,
         selectionLimit: COMPOSER_PHOTO_SELECTION_LIMIT,
       });
@@ -144,63 +150,213 @@ export function DrawingList() {
     } catch (error) {
       alert.show({ title: error instanceof Error ? error.message : String(error) });
     }
-  }, [alert, openPaintingWithAttachments]);
+  }, [alert, openPaintingWithAttachments, requestPhotoAccess]);
+
+  const contentContainerStyle = useMemo(
+    () => ({ paddingBottom: bottomInset, paddingHorizontal: galleryContentEdge }),
+    [bottomInset],
+  );
+  const listExtraData = useMemo<DrawingListExtraData>(
+    () => ({
+      generatingLabel: t('painting.status.generating'),
+      interruptedLabel: t('painting.status.interrupted'),
+      isEditing,
+      label: t('painting.history.item'),
+      onToggle: toggleId,
+      selectedIds,
+      width: columnWidth,
+    }),
+    [columnWidth, isEditing, selectedIds, t, toggleId],
+  );
+  const listHeader = useMemo(
+    () => (
+      <DrawingListHeader
+        isEditing={isEditing}
+        isHistoryVisible={
+          visibleGalleryItems.length > 0 || paintings.isLoading || gallery.isLoading
+        }
+        isRecentPhotosLoading={recentPhotos.isLoading}
+        photos={recentPhotos.photos}
+        onRecentPhotoPress={handleRecentPhotoPress}
+        onRequestPhotoAccess={requestPhotoAccess}
+        onTemplateUse={handleTemplateUse}
+        onViewAllPress={handleViewAllPress}
+      />
+    ),
+    [
+      gallery.isLoading,
+      handleRecentPhotoPress,
+      handleTemplateUse,
+      handleViewAllPress,
+      isEditing,
+      paintings.isLoading,
+      recentPhotos.isLoading,
+      recentPhotos.photos,
+      requestPhotoAccess,
+      visibleGalleryItems.length,
+    ],
+  );
+  const listEmpty = useMemo(
+    () =>
+      paintings.isLoading || gallery.isLoading ? (
+        <View className="h-32 items-center justify-center">
+          <ActivityIndicator />
+        </View>
+      ) : (
+        <View
+          className="min-h-48 flex-1 items-center justify-center gap-4 px-6 pb-24"
+          testID="painting-history-empty"
+        >
+          <Text className="text-center text-base text-foreground">
+            {t('painting.history.empty')}
+          </Text>
+          <Button
+            accessibilityLabel={t('painting.history.createNew')}
+            onPress={handleCreatePainting}
+            testID="painting-history-create"
+            variant="default"
+          >
+            <Button.Label>{t('painting.history.createNew')}</Button.Label>
+          </Button>
+        </View>
+      ),
+    [gallery.isLoading, handleCreatePainting, paintings.isLoading, t],
+  );
+  const listFooter = useMemo(
+    () =>
+      paintings.isLoadingMore ? (
+        <View className="h-16 items-center justify-center">
+          <ActivityIndicator />
+        </View>
+      ) : null,
+    [paintings.isLoadingMore],
+  );
+  const listData = paintings.isLoading || gallery.isLoading ? [] : visibleGalleryItems;
 
   return (
-    <ScrollView
-      className="flex-1 bg-background"
-      // Stable across the edit⇄done flip (see useMessageListBottomInset) so the
-      // gallery never reflows on toggle.
-      contentContainerStyle={{ paddingBottom: bottomInset }}
-      onScroll={({ nativeEvent }) => {
-        const distanceToEnd =
-          nativeEvent.contentSize.height -
-          (nativeEvent.contentOffset.y + nativeEvent.layoutMeasurement.height);
-        if (distanceToEnd < 400) {
-          void paintings.loadMore();
-        }
-      }}
-      scrollEventThrottle={160}
-      showsVerticalScrollIndicator={false}
-      testID="drawing-home-scroll"
-    >
+    <View className="flex-1 bg-background">
+      <FlashList
+        contentContainerStyle={contentContainerStyle}
+        contentInsetAdjustmentBehavior="automatic"
+        data={listData}
+        extraData={listExtraData}
+        getItemType={getDrawingGridItemType}
+        keyExtractor={drawingGridItemKeyExtractor}
+        ListEmptyComponent={listEmpty}
+        ListEmptyComponentStyle={styles.empty}
+        ListFooterComponent={listFooter}
+        ListHeaderComponent={listHeader}
+        ListHeaderComponentStyle={styles.header}
+        masonry
+        numColumns={2}
+        onEndReached={paintings.loadMore}
+        onEndReachedThreshold={0.7}
+        optimizeItemArrangement
+        renderItem={renderDrawingGridItem}
+        showsVerticalScrollIndicator={false}
+        style={styles.list}
+        testID="drawing-home-scroll"
+      />
+    </View>
+  );
+}
+
+type DrawingListExtraData = {
+  generatingLabel: string;
+  interruptedLabel: string;
+  isEditing: boolean;
+  label: string;
+  onToggle: (paintingId: string) => void;
+  selectedIds: ReadonlySet<string>;
+  width: number;
+};
+
+function drawingGridItemKeyExtractor(item: PaintingGalleryItem) {
+  return item.key;
+}
+
+function getDrawingGridItemType(item: PaintingGalleryItem) {
+  return item.kind;
+}
+
+function renderDrawingGridItem({ extraData, item }: ListRenderItemInfo<PaintingGalleryItem>) {
+  const listData = extraData as DrawingListExtraData;
+
+  return (
+    <View className="px-[3px] pb-1.5">
+      <DrawingGridItem
+        generatingLabel={listData.generatingLabel}
+        height={listData.width / item.aspectRatio}
+        interruptedLabel={listData.interruptedLabel}
+        isEditing={listData.isEditing}
+        isSelected={listData.selectedIds.has(item.painting.id)}
+        item={item}
+        label={listData.label}
+        onToggle={listData.onToggle}
+        width={listData.width}
+      />
+    </View>
+  );
+}
+
+type DrawingListHeaderProps = {
+  isEditing: boolean;
+  isHistoryVisible: boolean;
+  isRecentPhotosLoading: boolean;
+  onRecentPhotoPress: (photo: PhotoPreview) => Promise<void>;
+  onRequestPhotoAccess: () => Promise<boolean>;
+  onTemplateUse: (template: PaintingTemplate) => void;
+  onViewAllPress: () => Promise<void>;
+  photos: readonly PhotoPreview[];
+};
+
+function DrawingListHeader({
+  isEditing,
+  isHistoryVisible,
+  isRecentPhotosLoading,
+  onRecentPhotoPress,
+  onRequestPhotoAccess,
+  onTemplateUse,
+  onViewAllPress,
+  photos,
+}: DrawingListHeaderProps) {
+  const { t } = useTranslation();
+
+  return (
+    <>
       {isEditing ? null : (
         <>
           <View className="pb-5 pt-2">
-            <View className="h-10 flex-row items-center justify-between px-4">
-              <Text className="font-semibold text-foreground text-base">
-                {t('painting.photos.title')}
-              </Text>
-              <Pressable
+            <Section.Header className="h-10 px-4" title={t('painting.photos.title')}>
+              <Button
                 accessibilityLabel={t('painting.photos.viewAll')}
-                accessibilityRole="button"
-                className="h-10 flex-row items-center px-1 active:opacity-60"
-                onPress={() => void handleViewAllPress()}
+                className="min-h-10 px-1 py-0"
+                onPress={() => void onViewAllPress()}
+                size="xs"
                 testID="painting-photos-view-all"
+                variant="ghost"
               >
-                <Text className="font-medium text-primary text-sm">
-                  {t('painting.photos.viewAll')}
-                </Text>
-              </Pressable>
-            </View>
-            {recentPhotos.isLoading ? (
+                <Button.Label numberOfLines={1}>{t('painting.photos.viewAll')}</Button.Label>
+              </Button>
+            </Section.Header>
+            {isRecentPhotosLoading ? (
               <View className="h-20 items-center justify-center">
                 <ActivityIndicator />
               </View>
-            ) : recentPhotos.photos.length > 0 ? (
+            ) : photos.length > 0 ? (
               <ScrollView
                 contentContainerClassName="gap-2 px-4"
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 testID="painting-recent-photos"
               >
-                {recentPhotos.photos.map((photo, index) => (
+                {photos.map((photo, index) => (
                   <Pressable
                     accessibilityLabel={t('painting.photos.item', { index: index + 1 })}
                     accessibilityRole="button"
                     className="size-20 overflow-hidden rounded-md active:opacity-70"
                     key={photo.id}
-                    onPress={() => void handleRecentPhotoPress(photo)}
+                    onPress={() => void onRecentPhotoPress(photo)}
                     testID={`painting-recent-photo-${index}`}
                   >
                     <Image
@@ -215,68 +371,27 @@ export function DrawingList() {
               </ScrollView>
             ) : (
               <Pressable
+                accessibilityLabel={t('painting.photos.requestAccess')}
                 accessibilityRole="button"
-                className="mx-4 h-20 items-center justify-center rounded-md bg-secondary active:opacity-70"
-                onPress={() => void handleViewAllPress()}
+                className="mx-4 size-20 items-center justify-center rounded-md bg-secondary active:opacity-70"
+                onPress={() => void onRequestPhotoAccess()}
+                testID="painting-photos-permission-placeholder"
               >
-                <ImageIcon className="size-6 text-foreground-tertiary" strokeWidth={1.5} />
+                <ImageIcon className="size-6 text-foreground-tertiary" />
               </Pressable>
             )}
           </View>
 
-          <PaintingTemplateRow onUseTemplate={handleTemplateUse} />
+          <PaintingTemplateRow onUseTemplate={onTemplateUse} />
         </>
       )}
 
-      <Text className="px-4 pb-3 font-semibold text-foreground text-base">
-        {t('painting.history.title')}
-      </Text>
-      {paintings.isLoading || gallery.isLoading ? (
-        <View className="h-32 items-center justify-center">
-          <ActivityIndicator />
-        </View>
-      ) : visibleGalleryItems.length === 0 ? (
-        <View className="h-32 items-center justify-center px-6">
-          <Pressable
-            accessibilityLabel={t('painting.history.create')}
-            accessibilityRole="button"
-            className="h-9 min-w-20 items-center justify-center rounded-xl bg-primary px-4 active:opacity-80"
-            onPress={handleCreatePainting}
-            testID="painting-history-create"
-          >
-            <Text className="font-medium text-primary-foreground text-sm" numberOfLines={1}>
-              {t('painting.history.create')}
-            </Text>
-          </Pressable>
-        </View>
-      ) : (
-        <View className="flex-row gap-1.5 px-4" testID="painting-history-masonry">
-          {namedColumns.map((column) => (
-            <View className="flex-1 gap-1.5" key={column.key}>
-              {column.items.map((item) => (
-                <DrawingGridItem
-                  generatingLabel={t('painting.status.generating')}
-                  height={columnWidth / item.aspectRatio}
-                  interruptedLabel={t('painting.status.interrupted')}
-                  isEditing={isEditing}
-                  isSelected={selectedIds.has(item.painting.id)}
-                  item={item}
-                  key={item.key}
-                  label={t('painting.history.item')}
-                  onToggle={toggleId}
-                  width={columnWidth}
-                />
-              ))}
-            </View>
-          ))}
-        </View>
-      )}
-      {paintings.isLoadingMore ? (
-        <View className="h-16 items-center justify-center">
-          <ActivityIndicator />
-        </View>
+      {isHistoryVisible ? (
+        <Text className="px-4 pb-3 font-semibold text-foreground text-base">
+          {t('painting.history.title')}
+        </Text>
       ) : null}
-    </ScrollView>
+    </>
   );
 }
 
@@ -338,8 +453,8 @@ function DrawingGridItem({
           exiting={FadeOut.duration(120)}
         >
           {isSelected ? (
-            <View className="size-6 items-center justify-center rounded-full bg-primary">
-              <CheckIcon className="size-4 text-primary-foreground" strokeWidth={3} />
+            <View className="size-6 items-center justify-center rounded-full bg-foreground">
+              <CheckIcon className="size-4 text-background" />
             </View>
           ) : (
             <View className="size-6 rounded-full border-2 border-border-strong bg-constant-black/30" />
@@ -365,9 +480,14 @@ function DrawingGridItem({
   // it goes back to the composer, which is where its progress — or its retry —
   // lives.
   return item.kind === 'output' ? (
-    <PaintingZoomLink fileEntryId={item.fileEntryId} paintingId={item.painting.id}>
+    <ArtifactPreviewLink
+      href={{
+        pathname: '/paintings/[paintingId]',
+        params: { fileEntryId: item.fileEntryId, paintingId: item.painting.id },
+      }}
+    >
       {tile}
-    </PaintingZoomLink>
+    </ArtifactPreviewLink>
   ) : (
     <Link asChild href={{ pathname: '/paintings', params: { paintingId: item.painting.id } }}>
       {tile}
@@ -393,6 +513,7 @@ function renderTileContent({
       <Image
         cachePolicy="memory-disk"
         contentFit="cover"
+        recyclingKey={item.key}
         source={item.uri}
         style={{ height: '100%', width: '100%' }}
         transition={120}
@@ -419,8 +540,8 @@ function renderTileContent({
 
   return (
     <View className="flex-1 items-center justify-center gap-1 px-2">
-      <RotateCcwIcon className="size-5 text-foreground-tertiary" strokeWidth={1.5} />
-      <Text className="text-center font-medium text-foreground-secondary text-xs">
+      <RotateCcwIcon className="size-5 text-foreground-tertiary" />
+      <Text className="text-center font-medium text-muted-foreground text-xs">
         {interruptedLabel}
       </Text>
       {item.message ? (
@@ -435,41 +556,68 @@ function renderTileContent({
 function useRecentPaintingPhotos(enabled: boolean) {
   const [isLoading, setLoading] = useState(true);
   const [photos, setPhotos] = useState<PhotoPreview[]>([]);
+  const isActiveRef = useRef(false);
+
+  const refresh = useCallback(
+    async (requestPermission: boolean) => {
+      if (!enabled) {
+        return false;
+      }
+
+      try {
+        let permission = await MediaLibrary.getPermissionsAsync(false, ['photo']);
+        if (!permission.granted && (requestPermission || permission.canAskAgain)) {
+          permission = await MediaLibrary.requestPermissionsAsync(false, ['photo']);
+        }
+        const nextPhotos = permission.granted
+          ? (await loadPhotoPreviewPage(0)).photoPreviews.slice(0, recentPhotoLimit)
+          : [];
+        if (isActiveRef.current) {
+          setPhotos(nextPhotos);
+          setLoading(false);
+        }
+        return permission.granted;
+      } catch {
+        if (isActiveRef.current) {
+          setPhotos([]);
+          setLoading(false);
+        }
+        return false;
+      }
+    },
+    [enabled],
+  );
 
   useEffect(() => {
     if (!enabled) {
       return;
     }
-    let active = true;
-    const load = async () => {
-      let permission = await MediaLibrary.getPermissionsAsync(false, ['photo']);
-      if (!permission.granted && permission.canAskAgain) {
-        permission = await MediaLibrary.requestPermissionsAsync(false, ['photo']);
-      }
-      if (permission.granted) {
-        const page = await loadPhotoPreviewPage(0);
-        if (active) {
-          setPhotos(page.photoPreviews.slice(0, recentPhotoLimit));
-        }
-      } else if (active) {
-        setPhotos([]);
-      }
-      if (active) {
-        setLoading(false);
-      }
-    };
-    void load().catch(() => {
-      if (active) {
-        setPhotos([]);
-        setLoading(false);
-      }
-    });
-    const subscription = MediaLibrary.addListener(() => void load());
+    isActiveRef.current = true;
+    const refreshPhotos = () => void refresh(false);
+    queueMicrotask(refreshPhotos);
+    const subscription = MediaLibrary.addListener(refreshPhotos);
     return () => {
-      active = false;
+      isActiveRef.current = false;
       subscription.remove();
     };
-  }, [enabled]);
+  }, [enabled, refresh]);
 
-  return { isLoading: enabled && isLoading, photos };
+  const requestAccess = useCallback(() => refresh(true), [refresh]);
+
+  return useMemo(
+    () => ({ isLoading: enabled && isLoading, photos, requestAccess }),
+    [enabled, isLoading, photos, requestAccess],
+  );
 }
+
+const styles = StyleSheet.create({
+  empty: {
+    flexGrow: 1,
+  },
+  header: {
+    marginHorizontal: -galleryContentEdge,
+  },
+  list: {
+    flex: 1,
+  },
+});

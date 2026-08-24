@@ -1,6 +1,4 @@
 import type { ImageGenerationMode, ParamValues } from '@cherrystudio/provider-registry';
-import { isTerminalStatus } from '@cherrystudio/universal/data/api/schemas/jobs';
-import type { UniqueModelId } from '@cherrystudio/universal/data/types/model';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -10,6 +8,8 @@ import type {
   PaintingGenerationResult as BackendPaintingGenerationResult,
   PaintingGenerationOutput,
 } from '@/shared/contracts';
+import { isTerminalStatus } from '@/shared/data/api/schemas/jobs';
+import type { UniqueModelId } from '@/shared/data/types/model';
 
 import { imageParamsAspectRatio } from '../utils/imageGenerationParams';
 import {
@@ -34,6 +34,7 @@ export type PaintingGenerationInput = {
   attachments: readonly ComposerAttachmentDraft[];
   mode: ImageGenerationMode;
   modelId: UniqueModelId;
+  modelName: string;
   paramValues: ParamValues;
   prompt: string;
 };
@@ -234,6 +235,7 @@ export function usePaintingGeneration({
           ),
           mode: input.mode,
           modelId: input.modelId,
+          modelName: input.modelName,
           // Retrying reuses the interrupted receipt so its gallery tile flips in
           // place; a receipt that already holds images is never passed here, and
           // the backend rejects it if one ever is.

@@ -1,17 +1,14 @@
+import SettingsIcon from '@cherrystudio/app-icons/icons/settings';
 import { Section } from '@cherrystudio/ui/components';
-import type {
-  PermissionMode,
-  PermissionPreferenceKey,
-} from '@cherrystudio/universal/data/preference';
 import { useLocalSearchParams } from 'expo-router';
-import { CheckIcon, SettingsIcon } from 'lucide-uniwind/png';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, View } from 'react-native';
 
-import { BackHeader } from '@/frontend/components/headers';
+import { RouteHeader } from '@/frontend/components/headers';
 import { useBackendModule } from '@/frontend/data';
 import { usePreference } from '@/frontend/data/hooks';
+import type { PermissionMode, PermissionPreferenceKey } from '@/shared/data/preference';
 
 import { usePermissionPolicies } from './hooks/usePermissionPolicies';
 import { usePermissionSystemStatuses } from './hooks/usePermissionSystemStatuses';
@@ -38,7 +35,7 @@ export default function PermissionDetailSettingsScreen() {
 
   return (
     <>
-      <BackHeader title={t(`settings.permissions.type.${kind}`)} />
+      <RouteHeader title={t(`settings.permissions.type.${kind}`)} />
       <ScrollView
         alwaysBounceVertical={false}
         className="flex-1"
@@ -104,17 +101,12 @@ function PermissionModeGroup({
       {permissionModes.map((option) => {
         const selected = option === mode;
         return (
-          <Section.Item
-            accessibilityRole="radio"
-            accessibilityState={{ checked: selected, disabled: isUpdating }}
+          <Section.RadioItem
             disabled={isUpdating}
             key={option}
             label={t(`settings.permissions.mode.${option}`)}
             onPress={() => void selectMode(option)}
-            showChevron={false}
-            trailing={
-              selected ? <CheckIcon className="size-5 text-primary" strokeWidth={2.5} /> : null
-            }
+            selected={selected}
           />
         );
       })}
@@ -146,7 +138,7 @@ function OpenSettingsSection({
     >
       <Section.Item
         label={t('settings.permissions.openSystemSettings')}
-        leading={<SettingsIcon className="size-5 text-foreground" strokeWidth={2} />}
+        leading={<SettingsIcon className="size-5 text-foreground" />}
         onPress={() => void recoverAccess()}
       />
     </Section>

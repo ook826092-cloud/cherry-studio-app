@@ -1,7 +1,7 @@
-import type { Painting } from '@cherrystudio/universal/data/types/painting';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
-import type { MessageListProps } from '@/frontend/components/messagePresentation';
+import type { MessageListProps } from '@/frontend/components/messages';
+import type { Painting } from '@/shared/data/types/painting';
 
 import type {
   PaintingGenerationInput,
@@ -74,6 +74,7 @@ const input: PaintingGenerationInput = {
   attachments: [],
   mode: 'generate',
   modelId: 'provider::image-model',
+  modelName: 'Image Model',
   paramValues: { size: '1664x928' },
   prompt: 'Draw a mountain lake',
 };
@@ -114,11 +115,9 @@ jest.mock('react-i18next', () => ({
 
 jest.mock('@/frontend/utils/constants', () => ({ isIOS: false }));
 
-jest.mock('@/frontend/components/composer', () => ({
-  ComposerDock: ({ children }: { children: React.ReactNode }) => children,
-  ManagedComposerProvider: ({ children, ...props }: { children: React.ReactNode }) => {
-    mockProviderProps = props;
-    return children;
+jest.mock('@cherrystudio/ui/components', () => ({
+  Composer: {
+    Dock: ({ children }: { children: React.ReactNode }) => children,
   },
   useComposerDockLayout: () => ({
     contentBottomInset: 88,
@@ -128,7 +127,14 @@ jest.mock('@/frontend/components/composer', () => ({
   }),
 }));
 
-jest.mock('@/frontend/components/messagePresentation', () => ({
+jest.mock('@/frontend/components/composer', () => ({
+  ManagedComposerProvider: ({ children, ...props }: { children: React.ReactNode }) => {
+    mockProviderProps = props;
+    return children;
+  },
+}));
+
+jest.mock('@/frontend/components/messages', () => ({
   MessageList: (props: MessageListProps) => {
     const { useEffect } = jest.requireActual('react');
     useEffect(() => {
@@ -139,7 +145,7 @@ jest.mock('@/frontend/components/messagePresentation', () => ({
     }, []);
     mockMessageListProps = props;
     const assistant = props.messages.find((message) => message.role === 'assistant');
-    return assistant ? props.renderAssistantMessage?.(assistant) : null;
+    return assistant ? props.renderMessage(assistant) : null;
   },
 }));
 
@@ -224,6 +230,11 @@ describe('PaintingComposer', () => {
       paintingId: painting.id,
       status: 'idle',
     });
+    expect(mockMessageListProps?.extraData).toMatchObject({
+      outputs: files.outputs,
+      paintingId: painting.id,
+      status: 'idle',
+    });
     expect(mockProviderProps).toMatchObject({ initialAttachments: [], initialDraft: '' });
   });
 
@@ -249,7 +260,6 @@ describe('PaintingComposer', () => {
       type: 'text',
     });
     expect(mockMessageListProps?.messages[1].status).toBe('pending');
-    expect(mockMessageListProps?.animateFirstEnteringMessage).toBe(true);
     expect(mockMessageListProps?.enteringMessageId).toBe('uuid-2');
 
     await act(async () => {
@@ -316,7 +326,7 @@ describe('PaintingComposer', () => {
           cherry: { fileEntryId: 'input-1' },
         },
         type: 'file',
-        url: 'file:///input.png',
+        url: 'cherry://file/input-1',
       },
     ]);
     expect(mockMessageListProps?.messages[1].status).toBe('error');

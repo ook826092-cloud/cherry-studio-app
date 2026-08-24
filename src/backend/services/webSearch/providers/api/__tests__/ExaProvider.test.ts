@@ -1,5 +1,4 @@
-import type { WebSearchProvider } from '@cherrystudio/universal/data/preference';
-import type { WebSearchExecutionConfig } from '@cherrystudio/universal/data/types/webSearch';
+import type { WebSearchProvider, WebSearchExecutionConfig } from '@/shared/data/types/webSearch';
 
 import { ApiKeyRotationState } from '../../../utils/provider';
 import exaResponseFixture from '../../__tests__/fixtures/exa-response.json';
@@ -7,7 +6,6 @@ import { ExaProvider } from '../ExaProvider';
 
 const runtimeConfig: WebSearchExecutionConfig = {
   maxResults: 4,
-  excludeDomains: [],
   compression: { method: 'none', cutoffLimit: 2000 },
 };
 

@@ -1,9 +1,7 @@
-import {
-  type Assistant,
-  DEFAULT_ASSISTANT_SETTINGS,
-} from '@cherrystudio/universal/data/types/assistant';
 import { Pressable } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+
+import { type Assistant, DEFAULT_ASSISTANT_SETTINGS } from '@/shared/data/types/assistant';
 
 import { MainHeaderAssistantButton, useMainHeaderAssistant } from '../MainHeaderAssistantButton';
 
@@ -31,6 +29,12 @@ jest.mock('@/frontend/hooks/chat', () => ({
   }),
 }));
 
+jest.mock('../../components/HeaderAction/HeaderIconButton', () => {
+  const { Pressable: MockPressable } = jest.requireActual('react-native');
+
+  return { HeaderIconButton: MockPressable };
+});
+
 function Harness() {
   const { assistant, openAssistant } = useMainHeaderAssistant();
 
@@ -50,9 +54,7 @@ function makeAssistant(): Assistant {
     createdAt: '2026-07-01T00:00:00.000Z',
     description: '',
     emoji: '🌟',
-    groupId: null,
     id: 'assistant-1',
-    knowledgeBaseIds: [],
     mcpServerIds: [],
     modelId: null,
     modelName: null,
@@ -60,7 +62,6 @@ function makeAssistant(): Assistant {
     orderKey: 'a1',
     prompt: '',
     settings: DEFAULT_ASSISTANT_SETTINGS,
-    tags: [],
     updatedAt: '2026-07-01T00:00:00.000Z',
   };
 }
@@ -112,6 +113,22 @@ describe('MainHeaderAssistantButton', () => {
       params: { assistantId: 'assistant-1' },
       pathname: '/assistants/[assistantId]/edit',
     });
+  });
+
+  it('keeps the route assistant while the topic is still loading', async () => {
+    // 发出新话题第一条消息时导航先于话题可读：`topicId` 已经在 URL 上、`useTopic` 还没
+    // 返回。按钮此刻若消失，iOS 的 toolbar 会连着旁边那个按钮一起原生重建。
+    mockAssistantId = 'assistant-1';
+    mockTopicAssistantId = undefined;
+    mockTopicId = 'topic-1';
+
+    await act(async () => {
+      renderer = create(<Harness />);
+    });
+
+    expect(
+      renderer?.root.findByProps({ testID: 'current-assistant-button' }).props.accessibilityLabel,
+    ).toBe('Peanut');
   });
 
   it('starts a new topic with the current topic assistant', async () => {

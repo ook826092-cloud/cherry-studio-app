@@ -1,9 +1,8 @@
 import { randomUUID as mockRandomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import { JOB_ERROR_CODES } from '@cherrystudio/universal/data/api/schemas/jobs';
-
 import { uninstallTestHost } from '@/backend/core/application/testHost';
+import { JOB_ERROR_CODES } from '@/shared/data/api/schemas/jobs';
 
 import { DISPOSE_DRAIN_TIMEOUT_MS } from '../JobRuntime';
 import { MAX_CANCEL_REASON_CHARS } from '../types';
@@ -126,16 +125,21 @@ describe('JobRuntime cancel & dispose', () => {
   it('force-finalizes a stubborn handler as timed-out; the late settle is a fenced no-op', async () => {
     const gate = makeGate();
     let settledCount = 0;
-    const { jobService, runtime } = await setup([
+    const releaseLease = jest.fn();
+    const { jobService, runtime } = await setup(
       [
-        'internal.stubborn',
-        makeStubbornHandler(gate, {
-          onSettled: () => {
-            settledCount += 1;
-          },
-        }),
+        [
+          'internal.stubborn',
+          makeStubbornHandler(gate, {
+            executionClass: 'user-continued',
+            onSettled: () => {
+              settledCount += 1;
+            },
+          }),
+        ],
       ],
-    ]);
+      { keepAlive: { acquire: () => ({ release: releaseLease }) } },
+    );
     const handle = await enqueueTest(runtime, 'internal.stubborn', {});
     await waitFor(async () => (await jobService.getById(handle.id))?.status === 'running');
 
@@ -147,6 +151,7 @@ describe('JobRuntime cancel & dispose', () => {
     expect(finished.error?.code).toBe(JOB_ERROR_CODES.CANCELLED);
     expect(finished.output).toBeNull();
     expect(settledCount).toBe(1);
+    expect(releaseLease).toHaveBeenCalledTimes(1);
 
     // The handler is still running in memory; when it finally returns, the
     // weak fence blocks its completed write — nothing is overwritten.

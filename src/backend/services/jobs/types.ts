@@ -1,9 +1,3 @@
-import type {
-  JobError,
-  JobSnapshot,
-  JobStatus,
-  RetryPolicy,
-} from '@cherrystudio/universal/data/api/schemas/jobs';
 /**
  * Job runtime handler contract and constants.
  *
@@ -20,16 +14,18 @@ import type {
 import type { LoggerService } from '@logger';
 
 import type { ResourceScope } from '@/backend/core/resources/types';
+import type { JobError, JobSnapshot, JobStatus, RetryPolicy } from '@/shared/data/api/schemas/jobs';
 
 import type { JobPayloadOf, JobType } from './jobRegistry';
 
 /**
  * What guarantee a handler's work actually requires from the OS execution
- * window. Mobile-only (desktop always has a live process). Phase 1 dispatches
- * only `foreground-only`; other classes stay claimable-in-principle but are
- * filtered out of the pump window until their platform adapters exist.
- * `server-required` is intentionally not a class — such work must never be
- * enqueued locally.
+ * window. Mobile-only (desktop always has a live process). The pump
+ * dispatches `foreground-only` and `user-continued` (the latter wrapped in a
+ * KeepAliveCoordinator lease so it survives backgrounding); other classes
+ * stay claimable-in-principle but are filtered out of the pump window until
+ * their platform adapters exist. `server-required` is intentionally not a
+ * class — such work must never be enqueued locally.
  */
 export type JobExecutionClass =
   | 'foreground-only'
@@ -70,7 +66,6 @@ export interface JobContext<TPayload = unknown> {
 export interface JobSettledEvent<TPayload = unknown> {
   jobId: string;
   type: string;
-  scheduleId: string | null;
   parentId: string | null;
   status: Extract<JobStatus, 'completed' | 'failed' | 'cancelled'>;
   readonly input: TPayload;
@@ -105,6 +100,12 @@ export interface JobHandler<TPayload = unknown> {
    *
    * Called with the persisted input, so it must be pure and total — a throw
    * here would fail an execution that was otherwise ready to run.
+   *
+   * TOMBSTONE: before registering the first scoped handler with
+   * `recovery: 'retry'`, persist scope-cancellation intent. Scope cancellation
+   * currently aborts synchronously without setting `cancelRequested`; after a
+   * process death, retry recovery could otherwise revive work for a resource
+   * whose deletion or invalidation initiated that cancellation.
    */
   scopes?(input: TPayload): readonly ResourceScope[];
   /** Throw to fail; reject with the abort reason to cancel. */
@@ -149,7 +150,6 @@ export interface EnqueueOptions {
   idempotencyKey?: string;
   /** Unix ms; future values enqueue as `delayed`. Defaults to now. */
   scheduledAt?: number;
-  scheduleId?: string;
   parentId?: string;
   timeoutMs?: number;
   maxAttempts?: number;

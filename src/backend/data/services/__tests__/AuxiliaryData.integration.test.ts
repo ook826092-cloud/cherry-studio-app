@@ -9,10 +9,10 @@ import { customSqlStatements } from '@/backend/data/db/customSql';
 import type { Database, DbService } from '@/backend/data/db/DbService';
 import { schema } from '@/backend/data/db/schemas';
 
-import { agentGlobalSkillService } from '../AgentGlobalSkillService';
 import { contentSearchService } from '../ContentSearchService';
 import { entitySearchService } from '../EntitySearchService';
-import { temporaryChatService } from '../TemporaryChatService';
+import { messageService } from '../MessageService';
+import { topicService } from '../TopicService';
 
 jest.mock('uuid', () => ({ v4: mockRandomUUID, v7: mockRandomUUID }));
 jest.mock('@logger', () => ({
@@ -86,22 +86,16 @@ describe('auxiliary Data API integration', () => {
     sqlite.close();
   });
 
-  test('persists a temporary chat and reads it through entity and content search', async () => {
-    const topic = temporaryChatService.createTopic({ name: 'Needle topic' });
-    const first = temporaryChatService.appendMessage(topic.id, {
+  test('persists a chat and reads it through entity and content search', async () => {
+    const topic = await topicService.create({ name: 'Needle topic' });
+    const first = await messageService.create(topic.id, {
       data: { parts: [{ text: 'first question', type: 'text' }] },
       role: 'user',
     });
-    const last = temporaryChatService.appendMessage(topic.id, {
+    const last = await messageService.create(topic.id, {
       data: { parts: [{ text: '**needle** answer', type: 'text' }] },
       role: 'assistant',
     });
-
-    await expect(temporaryChatService.persist(topic.id)).resolves.toEqual({
-      messageCount: 2,
-      topicId: topic.id,
-    });
-    expect(temporaryChatService.hasTopic(topic.id)).toBe(false);
 
     const entityResult = await entitySearchService.search({
       q: 'Needle',
@@ -115,9 +109,8 @@ describe('auxiliary Data API integration', () => {
 
     const contentResult = await contentSearchService.search({
       q: 'needle',
-      sources: ['topic-message'],
     });
-    expect(contentResult.groups[0]?.items).toEqual([
+    expect(contentResult.items).toEqual([
       expect.objectContaining({
         messageId: last.id,
         snippet: 'needle answer',
@@ -132,51 +125,6 @@ describe('auxiliary Data API integration', () => {
     expect(root).toBeDefined();
     expect(persistedRows.find((row) => row.id === first.id)?.parent_id).toBe(root?.id);
     expect(persistedRows.find((row) => row.id === last.id)?.parent_id).toBe(first.id);
-  });
-
-  test('projects global skill enablement per agent without changing stored defaults', async () => {
-    const row = await agentGlobalSkillService.insert({
-      contentHash: 'hash-1',
-      folderName: 'builtin-skill',
-      isEnabled: true,
-      name: 'Builtin Skill',
-      source: 'builtin',
-    });
-    await dbService
-      .getDb()
-      .insert(schema.agentTable)
-      .values({
-        description: '',
-        configuration: { builtin_role: 'assistant' },
-        instructions: '',
-        model: null,
-        name: 'Agent',
-        orderKey: 'a0',
-        type: 'claude-code',
-      });
-    const [agent] = await dbService.getDb().select().from(schema.agentTable).limit(1);
-
-    await expect(agentGlobalSkillService.list()).resolves.toEqual([
-      expect.objectContaining({ id: row.id, isEnabled: false, name: 'Builtin Skill' }),
-    ]);
-    await expect(agentGlobalSkillService.list({ agentId: agent.id })).resolves.toEqual([
-      expect.objectContaining({ id: row.id, isEnabled: true }),
-    ]);
-    await agentGlobalSkillService.upsertJoin(agent.id, row.id, false);
-    await expect(agentGlobalSkillService.list({ agentId: agent.id })).resolves.toEqual([
-      expect.objectContaining({ id: row.id, isEnabled: false }),
-    ]);
-
-    const search = await entitySearchService.search({
-      q: 'Diagnose issues',
-      types: ['agent'],
-    });
-    expect(search.groups[0]?.items).toEqual([
-      expect.objectContaining({
-        id: agent.id,
-        subtitle: expect.stringContaining('Built-in Cherry Studio advisor'),
-      }),
-    ]);
   });
 });
 

@@ -1,19 +1,17 @@
-import type { PreferenceKeyType } from '@cherrystudio/universal/data/preference';
-
 import type { DbService } from '@/backend/data/db/DbService';
 import { PreferenceService } from '@/backend/data/PreferenceService';
+import type { PreferenceKeyType } from '@/shared/data/preference';
+import { PreferenceDefaults } from '@/shared/data/preference';
 
 jest.mock('@/backend/data/db/schemas', () => ({
   preferenceTable: {
     key: 'key',
-    scope: 'scope',
     value: 'value',
   },
 }));
 
 type PreferenceRow = {
   key: PreferenceKeyType;
-  scope: string;
   value: unknown;
 };
 
@@ -29,7 +27,6 @@ describe('PreferenceService', () => {
     const dbService = createFakeDbService([
       {
         key: 'chat.default_model_id',
-        scope: 'default',
         value: 'provider:model',
       },
     ]);
@@ -45,15 +42,14 @@ describe('PreferenceService', () => {
     const dbService = createFakeDbService([
       {
         key: 'chat.web_search.provider_overrides',
-        scope: 'default',
         value: {
           tavily: {
             capabilities: { searchKeywords: { apiHost: 42 } },
           },
         },
       },
-      { key: 'permissions.location_read', scope: 'default', value: 'always' },
-      { key: 'permissions.health_read', scope: 'default', value: 'invalid' },
+      { key: 'permissions.location_read', value: 'always' },
+      { key: 'permissions.health_read', value: 'invalid' },
     ]);
     const service = new PreferenceService(dbService);
 
@@ -68,7 +64,7 @@ describe('PreferenceService', () => {
     await expect(service.get('permissions.health_read')).resolves.toBe('invalid');
   });
 
-  test('writes permission preferences through the default scope', async () => {
+  test('writes permission preferences straight to their key', async () => {
     const dbService = createFakeDbService();
     const service = new PreferenceService(dbService);
     const listener = jest.fn();
@@ -79,19 +75,16 @@ describe('PreferenceService', () => {
     await service.set('permissions.calendar_write', 'ask');
 
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(dbService.rows.get('default.permissions.calendar_write')).toMatchObject({
+    expect(dbService.rows.get('permissions.calendar_write')).toMatchObject({
       key: 'permissions.calendar_write',
-      scope: 'default',
       value: 'ask',
     });
-    expect(Object.keys(service.getAll())).toHaveLength(243);
   });
 
   test('returns mapped and full cached preferences', async () => {
     const dbService = createFakeDbService([
       {
         key: 'ui.theme_mode',
-        scope: 'default',
         value: 'dark',
       },
     ]);
@@ -112,6 +105,8 @@ describe('PreferenceService', () => {
       'app.language': null,
       'ui.theme_mode': 'dark',
     });
+    // getAll surfaces the whole schema, not just the keys the database stored.
+    expect(Object.keys(service.getAll()).sort()).toEqual(Object.keys(PreferenceDefaults).sort());
   });
 
   test('writes changed values and notifies subscribed keys', async () => {
@@ -126,9 +121,8 @@ describe('PreferenceService', () => {
 
     expect(dbService.writeCount).toBe(1);
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(dbService.rows.get('default.chat.default_model_id')).toMatchObject({
+    expect(dbService.rows.get('chat.default_model_id')).toMatchObject({
       key: 'chat.default_model_id',
-      scope: 'default',
       value: 'provider:model',
     });
   });
@@ -142,12 +136,10 @@ describe('PreferenceService', () => {
     const dbService = createFakeDbService([
       {
         key: 'chat.default_model_id',
-        scope: 'default',
         value: 'provider:model',
       },
       {
         key: 'chat.web_search.provider_overrides',
-        scope: 'default',
         value: overrides,
       },
     ]);
@@ -171,7 +163,6 @@ describe('PreferenceService', () => {
     const dbService = createFakeDbService([
       {
         key: 'chat.default_model_id',
-        scope: 'default',
         value: 'old:model',
       },
     ]);
@@ -192,7 +183,6 @@ describe('PreferenceService', () => {
     const dbService = createFakeDbService([
       {
         key: 'chat.default_model_id',
-        scope: 'default',
         value: 'initial:model',
       },
     ]);
@@ -211,19 +201,19 @@ describe('PreferenceService', () => {
 
     expect(dbService.writeCount).toBe(2);
     expect(service.getCachedValue('chat.default_model_id')).toBe('second:model');
-    expect(dbService.rows.get('default.chat.default_model_id')?.value).toBe('second:model');
+    expect(dbService.rows.get('chat.default_model_id')?.value).toBe('second:model');
   });
 });
 
 function createFakeDbService(rows: PreferenceRow[] = []) {
-  const rowMap = new Map(rows.map((row) => [rowKey(row.scope, row.key), row]));
+  const rowMap = new Map(rows.map((row) => [row.key, row]));
   const writeWaiters: (() => void)[] = [];
 
   const db = {
     insert: () => ({
       values: (row: PreferenceRow) => ({
         onConflictDoUpdate: ({ set }: { set: Partial<PreferenceRow> }) => {
-          rowMap.set(rowKey(row.scope, row.key), {
+          rowMap.set(row.key, {
             ...row,
             ...set,
           });
@@ -233,9 +223,7 @@ function createFakeDbService(rows: PreferenceRow[] = []) {
       }),
     }),
     select: () => ({
-      from: () => ({
-        where: () => Promise.resolve(Array.from(rowMap.values())),
-      }),
+      from: () => Promise.resolve(Array.from(rowMap.values())),
     }),
   };
 
@@ -262,8 +250,4 @@ function createFakeDbService(rows: PreferenceRow[] = []) {
   } as unknown as FakeDbService;
 
   return service;
-}
-
-function rowKey(scope: string, key: PreferenceKeyType) {
-  return `${scope}.${key}`;
 }

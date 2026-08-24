@@ -82,13 +82,13 @@ export const SEMANTIC_GROUPS: SemanticGroup[] = [
   },
   {
     title: '交互叠加',
-    hint: '半透明叠加层，随下方表面变化。secondary/muted/accent 三个名字目前是同一个值（gray-alpha-100），按下才升到 300 档。',
+    hint: '半透明叠加层，随下方表面变化。secondary/muted/accent 三个名字目前是同一个值（gray-alpha-100），按下才升到 300 档。muted 与 accent 是 HeroUI 保留名：契约变量仍声明（此页直接读变量），但不作为 Tailwind 颜色工具类暴露 —— global.css 把它们的 --color-* 形式映射成了 HeroUI 自己的角色。',
     kind: 'surface',
     variables: ['--secondary', '--secondary-active', '--muted', '--accent'],
   },
   {
     title: '品牌',
-    hint: '--primary 是「用户的颜色」，主题色偏好会实时改写它；--brand 是「产品的颜色」，偏好动不了它，但跟着主题走（= green-900）。两者默认都是绿的，正因如此最容易混用：判断标准是「用户把主题色调成紫色后，这里该不该变紫」。',
+    hint: '--primary 是主操作颜色；--brand 是固定的 Cherry Studio Logo 红（#ff5757）。两者当前取值相同，但语义仍分开。',
     kind: 'surface',
     variables: ['--primary', '--primary-foreground', '--brand'],
   },
@@ -147,6 +147,10 @@ export const SURFACE_PAIRS: string[][] = [
   ['--success-subtle', '--success-subtle-foreground'],
   ['--info-subtle', '--info-subtle-foreground'],
   ['--inline-code', '--inline-code-foreground'],
+  ['--tag-amber', '--tag-amber-foreground'],
+  ['--tag-blue', '--tag-blue-foreground'],
+  ['--tag-green', '--tag-green-foreground'],
+  ['--tag-red', '--tag-red-foreground'],
 ];
 
 export const PAIR_VARIABLES = SURFACE_PAIRS.flat();
@@ -158,7 +162,7 @@ const GLYPHS = 'Ag';
 export const WEIGHT_SAMPLE = SHORT;
 
 /**
- * The ladder itself lives in `src/frontend/utils/typographyScale.ts` — these
+ * The ladder itself lives in `packages/ui/src/utils/typography-scale.ts` — these
  * rows only name the Tailwind utility each step backs. Sizes are read from
  * `--ui-text-*` at runtime, so an accessibility step shift shows up here too
  * rather than being documented as a fixed number.

@@ -1,10 +1,10 @@
-import type { Model } from '@cherrystudio/universal/data/types/model';
+import { useAlert } from '@cherrystudio/ui/components';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
 import { useMutation } from '@/frontend/data';
 import { usePreference } from '@/frontend/data/hooks';
+import type { Model } from '@/shared/data/types/model';
 
 /**
  * Removing models from their provider. The list removes by selection rather

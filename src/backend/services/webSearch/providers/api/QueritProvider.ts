@@ -1,8 +1,6 @@
-import type {
-  WebSearchExecutionConfig,
-  WebSearchResponse,
-} from '@cherrystudio/universal/data/types/webSearch';
 import * as z from 'zod';
+
+import type { WebSearchExecutionConfig, WebSearchResponse } from '@/shared/data/types/webSearch';
 
 import { BaseWebSearchProvider } from '../base/BaseWebSearchProvider';
 import type { ApiKeyRequestSearchContext } from '../base/context';
@@ -10,15 +8,6 @@ import type { ApiKeyRequestSearchContext } from '../base/context';
 const QueritSearchParamsSchema = z.object({
   query: z.string(),
   count: z.number().int().positive(),
-  filters: z
-    .object({
-      sites: z
-        .object({
-          exclude: z.array(z.string()),
-        })
-        .optional(),
-    })
-    .optional(),
 });
 
 const QueritSearchResponseSchema = z.object({
@@ -63,14 +52,6 @@ export class QueritProvider extends BaseWebSearchProvider {
       query,
       count: config.maxResults,
     });
-
-    const filters: z.input<typeof QueritSearchParamsSchema>['filters'] = {};
-    if (config.excludeDomains.length > 0) {
-      filters.sites = { exclude: config.excludeDomains };
-    }
-    if (Object.keys(filters).length > 0) {
-      requestBody.filters = filters;
-    }
 
     return {
       apiKey: this.resolveApiKey(),

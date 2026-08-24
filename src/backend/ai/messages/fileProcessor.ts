@@ -6,11 +6,17 @@
  * rewrites those with Node fs; mobile uses Expo FileSystem to produce data URLs.
  */
 
-import type { FileUIPart } from '@cherrystudio/universal/data/types/message';
-import { readCherryMeta } from '@cherrystudio/universal/data/types/uiParts';
 import { File } from 'expo-file-system';
 
 import { loggerService } from '@/shared/core/logger/LoggerService';
+import { parseFileEntryUrl } from '@/shared/data/types/file';
+import type { FileUIPart } from '@/shared/data/types/message';
+import { readCherryMeta } from '@/shared/data/types/uiParts';
+import {
+  imageMediaTypeFromExtension,
+  isAiSupportedImageMediaType,
+  isImageFileExtension,
+} from '@/shared/utils/imageFileTypes';
 
 const FALLBACK_MEDIA_TYPE = 'application/octet-stream';
 const logger = loggerService.withContext('fileProcessor');
@@ -25,7 +31,7 @@ export async function resolveFileUIPart(
   part: FileUIPart,
   resolveFileEntryUri?: ResolveFileEntryUri,
 ): Promise<FileUIPart | null> {
-  const fileEntryId = readCherryMeta(part)?.fileEntryId;
+  const fileEntryId = readCherryMeta(part)?.fileEntryId ?? parseFileEntryUrl(part.url);
 
   if (fileEntryId) {
     if (!resolveFileEntryUri) {
@@ -63,9 +69,33 @@ async function readLocalFilePart(
 ): Promise<FileUIPart | null> {
   try {
     const file = new File(uri);
-    const base64 = await file.base64();
     const mediaType = file.type || part.mediaType || FALLBACK_MEDIA_TYPE;
-    return { ...part, mediaType, url: `data:${mediaType};base64,${base64}` };
+    const extension = part.filename?.trim().split('.').pop()?.toLowerCase();
+    const isImage =
+      mediaType.startsWith('image/') ||
+      part.mediaType.startsWith('image/') ||
+      isImageFileExtension(extension);
+    const imageMediaType = mediaType.startsWith('image/')
+      ? mediaType
+      : part.mediaType.startsWith('image/')
+        ? part.mediaType
+        : imageMediaTypeFromExtension(extension);
+
+    if (isImage && !isAiSupportedImageMediaType(imageMediaType)) {
+      logger.warn('Unsupported image attachment was excluded from AI request', {
+        fileEntryId,
+        mediaType: imageMediaType,
+      });
+      return null;
+    }
+
+    const resolvedMediaType = isImage ? imageMediaType : mediaType;
+    const base64 = await file.base64();
+    return {
+      ...part,
+      mediaType: resolvedMediaType,
+      url: `data:${resolvedMediaType};base64,${base64}`,
+    };
   } catch (error) {
     logger.warn('Failed to read attachment for AI request', toError(error), {
       fileEntryId,

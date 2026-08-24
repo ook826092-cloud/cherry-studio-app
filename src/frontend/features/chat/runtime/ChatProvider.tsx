@@ -1,5 +1,4 @@
 import type { ComposerQueuedMessagePayload } from '@cherrystudio/universal/ai/transport';
-import type { UniqueModelId } from '@cherrystudio/universal/data/types/model';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'expo-router';
 import {
@@ -23,6 +22,7 @@ import type {
   ChatTopicSnapshot,
 } from '@/shared/contracts';
 import { NEW_TOPIC_SNAPSHOT_KEY } from '@/shared/contracts';
+import type { UniqueModelId } from '@/shared/data/types/model';
 
 type ChatTopicValue = ChatTopicSnapshot & {
   abort: () => void;
@@ -77,14 +77,14 @@ function createChatNavigation(input: { pathname: string; router: ReturnType<type
 
   return {
     openTopic: (topicId: string) => {
-      if (navigation.pathname === '/topics') {
+      if (navigation.pathname === '/') {
         navigation.router.setParams({ topicId });
         return;
       }
 
       navigation.router.replace({
         params: { topicId },
-        pathname: '/topics',
+        pathname: '/',
       });
     },
     update: (nextNavigation: typeof input) => {

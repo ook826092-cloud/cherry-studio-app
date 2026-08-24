@@ -1,15 +1,15 @@
 import { Button } from '@cherrystudio/ui/components';
-import type { Assistant } from '@cherrystudio/universal/data/types/assistant';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BackHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
+import { RouteHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
 import { ModelPickerIcon, useModelPickerData } from '@/frontend/components/modelPicker';
 import { useAssistantApiById } from '@/frontend/hooks/chat';
 import { screenBottomActionInset } from '@/frontend/utils/constants';
+import type { Assistant } from '@/shared/data/types/assistant';
 
 export default function AssistantDetailScreen() {
   const { t } = useTranslation();
@@ -28,7 +28,7 @@ export default function AssistantDetailScreen() {
 
     router.dismissTo({
       params: { topicId: returnTopicId },
-      pathname: '/topics',
+      pathname: '/',
     });
   }, [returnTopicId, router]);
   const openEditAssistant = useCallback(() => {
@@ -40,7 +40,7 @@ export default function AssistantDetailScreen() {
   // Lands on the new-topic screen with the assistant carried along, so the
   // first message creates a topic already bound to it.
   const startChat = useCallback(() => {
-    router.push({ params: { assistantId }, pathname: '/topics' });
+    router.push({ params: { assistantId }, pathname: '/' });
   }, [assistantId, router]);
   const rightActions = useMemo<HeaderToolbarAction[]>(
     () => [
@@ -49,6 +49,7 @@ export default function AssistantDetailScreen() {
         key: 'edit-assistant',
         label: t('common.edit'),
         onPress: openEditAssistant,
+        type: 'label',
       },
     ],
     [openEditAssistant, t],
@@ -60,7 +61,7 @@ export default function AssistantDetailScreen() {
 
   return (
     <>
-      <BackHeader onBack={returnTopicId ? returnToTopic : undefined} rightActions={rightActions} />
+      <RouteHeader onBack={returnTopicId ? returnToTopic : undefined} rightActions={rightActions} />
       <ScrollView
         alwaysBounceVertical={false}
         className="flex-1"
@@ -77,8 +78,8 @@ export default function AssistantDetailScreen() {
         )}
       </ScrollView>
       {assistant ? (
-        // The screen sits above the tab bar, so the home indicator is this
-        // button's only neighbour and it has to keep clear of it itself.
+        // The home indicator is this button's only neighbour, so the button
+        // has to keep clear of it itself.
         <View
           className="px-4 pt-2"
           style={{ paddingBottom: Math.max(insets.bottom, screenBottomActionInset) }}

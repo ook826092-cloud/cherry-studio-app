@@ -1,5 +1,6 @@
-import type { ApiKeyEntry } from '@cherrystudio/universal/data/types/provider';
 import * as Crypto from 'expo-crypto';
+
+import type { ApiKeyEntry } from '@/shared/data/types/provider';
 
 function createApiKeyEntryId(): string {
   return Crypto.randomUUID();
@@ -32,29 +33,12 @@ export function buildApiKeyEntriesFromInput(
   }));
 }
 
-export function cloneApiKeyEntries(apiKeys: readonly ApiKeyEntry[]): ApiKeyEntry[] {
-  return apiKeys.map((entry) => ({ ...entry }));
-}
-
-export function createEmptyApiKeyEntry(): ApiKeyEntry {
+function createEmptyApiKeyEntry(): ApiKeyEntry {
   return {
     id: createApiKeyEntryId(),
     isEnabled: true,
     key: '',
   };
-}
-
-export function apiKeyEntriesSignature(apiKeys: readonly ApiKeyEntry[]): string {
-  return JSON.stringify(
-    apiKeys
-      .flatMap((entry) => {
-        const key = entry.key.trim();
-        return key
-          ? [{ id: entry.id, isEnabled: entry.isEnabled, key, label: entry.label ?? '' }]
-          : [];
-      })
-      .sort((left, right) => left.id.localeCompare(right.id)),
-  );
 }
 
 export function normalizeApiKeyEntries(apiKeys: readonly ApiKeyEntry[]): ApiKeyEntry[] {

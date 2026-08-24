@@ -1,5 +1,4 @@
-import type { WebSearchProvider } from '@cherrystudio/universal/data/preference';
-import type { WebSearchExecutionConfig } from '@cherrystudio/universal/data/types/webSearch';
+import type { WebSearchProvider, WebSearchExecutionConfig } from '@/shared/data/types/webSearch';
 
 import { ApiKeyRotationState } from '../../../utils/provider';
 import bochaResponse from '../../__tests__/fixtures/bocha-response.json';
@@ -7,7 +6,6 @@ import { BochaProvider } from '../BochaProvider';
 
 const runtimeConfig: WebSearchExecutionConfig = {
   maxResults: 4,
-  excludeDomains: ['example.com'],
   compression: { method: 'none', cutoffLimit: 2000 },
 };
 
@@ -36,7 +34,6 @@ describe('BochaProvider', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
       query: 'hello',
       count: 4,
-      exclude: 'example.com',
       summary: true,
     });
     const headers = fetchMock.mock.calls[0][1].headers as Headers;

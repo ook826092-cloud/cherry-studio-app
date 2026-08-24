@@ -1,22 +1,12 @@
-import { Spinner } from '@cherrystudio/ui/components';
-import type { Provider } from '@cherrystudio/universal/data/types/provider';
-import { useQueryClient } from '@tanstack/react-query';
-import { Color, Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useToast } from 'heroui-native/toast';
-import { PlusIcon, SquareArrowOutUpRightIcon } from 'lucide-uniwind/png';
+import EllipsisIcon from '@cherrystudio/app-icons/icons/ellipsis';
+import SettingsIcon from '@cherrystudio/app-icons/icons/settings';
+import { type MenuItem, Spinner, useAlert } from '@cherrystudio/ui/components';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
-import { BackHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
-import { useBackendModule, useMutation } from '@/frontend/data';
-import {
-  dataApiCollectionFilters,
-  restoreQuerySnapshot,
-  updateQueriesOptimistically,
-} from '@/frontend/data/utils/optimisticQueryUpdate';
-import { openExternalUrl } from '@/frontend/utils/openExternalUrl';
+import { RouteHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
 
 import {
   buildApiKeyEntriesFromInput,
@@ -26,13 +16,15 @@ import {
   getEffectiveAuthConfig,
   getProviderPrimaryBaseUrl,
   normalizeApiKeyEntries,
+  ProviderApiServiceApiKeysField,
+  ProviderApiServiceEndpointField,
   ProviderApiServiceSaveError,
   shouldShowApiKeys,
   useProviderApiServiceQueries,
 } from './apiService';
-import { ProviderApiManagementSection } from './components/ProviderApiManagementSection';
 import { ProviderModelList } from './components/ProviderModelList';
 import { useProviderDetailSettings } from './detail';
+import { ProviderDetailBanner } from './detail/components/ProviderDetailBanner';
 import { ProviderDetailChrome } from './detail/components/ProviderDetailChrome/ProviderDetailChrome';
 import { ProviderDetailTabs } from './detail/components/ProviderDetailTabs/ProviderDetailTabs';
 import type { ProviderDetailTab } from './detail/components/ProviderDetailTabs/types';
@@ -49,36 +41,12 @@ export default function ProviderDetailSettingsScreen() {
   }>();
   const { t } = useTranslation();
   const router = useRouter();
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
   const { alert } = useAlert();
-  const providers = useBackendModule('providers');
   const [activeTab, setActiveTab] = useState<ProviderDetailTab>('configuration');
   const { models, modelsQuery, provider, providerQuery, updateProviderEnabledMutation } =
     useProviderDetailSettings(providerId ?? '');
   const { isDefaultModel, removeModels } = useProviderModelRemove();
   const modelSelection = useProviderModelSelection();
-  const deleteProviderMutation = useMutation('DELETE', '/providers/:id', {
-    onMutate: async (variables) => {
-      const providerIdToDelete = variables?.params.id;
-      const providers = await updateQueriesOptimistically<Provider[]>(
-        queryClient,
-        dataApiCollectionFilters('/providers'),
-        (current) => current?.filter((item) => item.id !== providerIdToDelete),
-      );
-
-      return { providers };
-    },
-    onError: (_error, _variables, context) => {
-      restoreQuerySnapshot(queryClient, context?.providers);
-    },
-    onSuccess: (_result, variables) => {
-      if (variables) {
-        queryClient.removeQueries({ queryKey: [`/providers/${variables.params.id}`] });
-      }
-    },
-    refresh: ['/providers'],
-  });
   const {
     apiKeys,
     apiKeysQuery,
@@ -111,40 +79,16 @@ export default function ProviderDetailSettingsScreen() {
   // under a finger that already aimed at it.
   const isProviderDetailLoading =
     providerQuery.isPending || apiKeysQuery.isPending || authConfigQuery.isPending;
-  const officialWebsite = provider?.websites?.official;
-  const openOfficialWebsite = useCallback(() => {
-    if (!officialWebsite) {
-      return;
-    }
-
-    void openExternalUrl(officialWebsite);
-  }, [officialWebsite]);
-  const openEndpointSettings = useCallback(() => {
+  const openProviderSettings = useCallback(() => {
     if (!providerId) {
       return;
     }
 
     router.push({
-      params: {
-        ...(provider?.name ? { providerName: provider.name } : {}),
-        providerId,
-      },
-      pathname: '/settings/provider/[providerId]/endpoint-settings',
+      params: { providerId },
+      pathname: '/settings/provider/[providerId]/edit',
     });
-  }, [provider, providerId, router]);
-  const openApiKeySettings = useCallback(() => {
-    if (!providerId) {
-      return;
-    }
-
-    router.push({
-      params: {
-        ...(provider?.name ? { providerName: provider.name } : {}),
-        providerId,
-      },
-      pathname: '/settings/provider/[providerId]/api-key-settings',
-    });
-  }, [provider, providerId, router]);
+  }, [providerId, router]);
   const commitApiKeys = useCallback(
     (input: string) => {
       const nextApiKeys = buildApiKeyEntriesFromInput(input, apiKeys ?? []);
@@ -218,44 +162,32 @@ export default function ProviderDetailSettingsScreen() {
       pathname: '/settings/provider/[providerId]/model-pull',
     });
   }, [loadPullPreview, provider, providerId, router]);
+  // The provider's own settings — logo, name, endpoints — rather than the keys
+  // and models this page already shows inline.
   const configurationActions = useMemo<HeaderToolbarAction[]>(
-    () =>
-      officialWebsite
-        ? [
-            {
-              accessibilityLabel: t('common.officialWebsite'),
-              androidIcon: SquareArrowOutUpRightIcon,
-              icon: 'arrow.up.right.square',
-              key: 'official-website',
-              onPress: openOfficialWebsite,
-            },
-          ]
-        : [],
-    [officialWebsite, openOfficialWebsite, t],
-  );
-  const modelActions = useMemo<HeaderToolbarAction[]>(
     () => [
       {
-        accessibilityLabel: t('settings.provider.models.add'),
-        androidIcon: PlusIcon,
+        accessibilityLabel: t('settings.provider.edit.title'),
         disabled: !provider,
-        icon: 'plus',
-        key: 'add-model',
-        onPress: openModelAddSettings,
+        icon: SettingsIcon,
+        key: 'provider-settings',
+        onPress: openProviderSettings,
+        type: 'icon',
       },
     ],
-    [openModelAddSettings, provider, t],
+    [openProviderSettings, provider, t],
   );
-  const pullAction = useMemo(
-    () =>
-      activeTab === 'models'
-        ? {
-            isDisabled: !provider || isModelPullLoading,
-            isLoading: isModelPullLoading,
-            onPress: () => void openModelPullSettings(),
-          }
-        : undefined,
-    [activeTab, isModelPullLoading, openModelPullSettings, provider],
+  const addAction = useMemo(
+    () => ({ isDisabled: !provider, onPress: openModelAddSettings }),
+    [openModelAddSettings, provider],
+  );
+  const modelPullAction = useMemo(
+    () => ({
+      isDisabled: !provider || isModelPullLoading,
+      isLoading: isModelPullLoading,
+      onPress: () => void openModelPullSettings(),
+    }),
+    [isModelPullLoading, openModelPullSettings, provider],
   );
   // The chat default is the one model the service refuses to delete, so it is
   // also the one row a selection leaves alone — including "select all".
@@ -263,10 +195,54 @@ export default function ProviderDetailSettingsScreen() {
     () => models.filter((model) => !isDefaultModel(model)).map((model) => model.id),
     [isDefaultModel, models],
   );
+  const modelMenuItems = useMemo<readonly MenuItem[]>(
+    () => [
+      {
+        disabled: !provider,
+        id: 'add-model',
+        label: t('settings.provider.models.addTitle'),
+        onPress: openModelAddSettings,
+      },
+      {
+        disabled: !provider || isModelPullLoading,
+        id: 'pull-models',
+        label: t('settings.provider.models.pullPreviewTitle'),
+        onPress: () => void openModelPullSettings(),
+      },
+      {
+        disabled: selectableIds.length === 0,
+        id: 'select-models',
+        label: t('settings.provider.models.selection.start'),
+        onPress: modelSelection.enterEditing,
+      },
+    ],
+    [
+      isModelPullLoading,
+      modelSelection.enterEditing,
+      openModelAddSettings,
+      openModelPullSettings,
+      provider,
+      selectableIds.length,
+      t,
+    ],
+  );
+  const modelActions = useMemo<HeaderToolbarAction[]>(
+    () => [
+      {
+        accessibilityLabel: t('common.more'),
+        disabled: !provider,
+        icon: EllipsisIcon,
+        items: modelMenuItems,
+        key: 'model-actions',
+        type: 'menu',
+      },
+    ],
+    [modelMenuItems, provider, t],
+  );
   const { exitEditing: exitModelSelection, selectedIds: selectedModelIds } = modelSelection;
   const selectedModels = useMemo(
-    () => models.filter((model) => selectedModelIds.has(model.id)),
-    [models, selectedModelIds],
+    () => models.filter((model) => selectedModelIds.has(model.id) && !isDefaultModel(model)),
+    [isDefaultModel, models, selectedModelIds],
   );
   const modelListSelection = useMemo(
     () =>
@@ -309,6 +285,7 @@ export default function ProviderDetailSettingsScreen() {
         key: 'finish-selecting-models',
         label: t('common.done'),
         onPress: exitModelSelection,
+        type: 'label',
       },
     ],
     [exitModelSelection, t],
@@ -317,14 +294,14 @@ export default function ProviderDetailSettingsScreen() {
     () => [
       {
         accessibilityLabel: t('common.delete'),
-        disabled: selectedModelIds.size === 0,
+        disabled: selectedModels.length === 0,
         key: 'remove-selected-models',
         label: t('common.delete'),
         onPress: requestRemoveSelectedModels,
-        tintColor: Color.ios.systemRed,
+        type: 'label',
       },
     ],
-    [requestRemoveSelectedModels, selectedModelIds.size, t],
+    [requestRemoveSelectedModels, selectedModels.length, t],
   );
   const handleToggleProvider = useCallback(() => {
     if (!provider) {
@@ -333,34 +310,6 @@ export default function ProviderDetailSettingsScreen() {
 
     updateProviderEnabledMutation.mutate(!provider.isEnabled);
   }, [provider, updateProviderEnabledMutation]);
-  const handleDeleteProvider = useCallback(() => {
-    if (!providerId) {
-      return;
-    }
-
-    const deletion = deleteProviderMutation.trigger({ params: { id: providerId } });
-    router.back();
-    void deletion
-      .then(() => {
-        toast.show({ label: t('settings.provider.toast.deleted'), variant: 'success' });
-      })
-      .catch(() => {
-        alert.show({ title: t('settings.provider.toast.deleteFailed') });
-      });
-  }, [alert, deleteProviderMutation, providerId, router, t, toast]);
-  const requestDeleteProvider = useCallback(() => {
-    if (!provider || !providers.canRemove(provider)) {
-      return;
-    }
-
-    alert.confirm({
-      confirmLabel: t('common.delete'),
-      description: t('settings.provider.delete.message', { name: provider.name }),
-      onConfirm: handleDeleteProvider,
-      role: 'destructive',
-      title: t('settings.provider.delete.title'),
-    });
-  }, [alert, handleDeleteProvider, provider, providers, t]);
 
   if (!providerId || providerQuery.isError) {
     return <Redirect href="/settings/provider" />;
@@ -378,7 +327,7 @@ export default function ProviderDetailSettingsScreen() {
     <>
       {/* Selecting takes the header over: the tabs would navigate out from under
           the selection, and "Done" belongs where the back button was. */}
-      <BackHeader
+      <RouteHeader
         leftActions={modelSelection.isEditing ? selectionHeaderLeftActions : undefined}
         rightActions={
           modelSelection.isEditing
@@ -389,8 +338,10 @@ export default function ProviderDetailSettingsScreen() {
         }
         title={
           modelSelection.isEditing
-            ? t('settings.provider.models.selection.count', { count: selectedModelIds.size })
-            : (providerName ?? t('settings.provider.tabs.configuration'))
+            ? t('settings.provider.models.selection.count', { count: selectedModels.length })
+            : // The route param is only there to name the page before the record
+              // lands; once it has, it is what a rename shows up in.
+              (provider?.name ?? providerName ?? t('settings.provider.tabs.configuration'))
         }
         titleElement={
           modelSelection.isEditing ? undefined : (
@@ -399,69 +350,73 @@ export default function ProviderDetailSettingsScreen() {
         }
       />
       {activeTab === 'configuration' ? (
-        <ScrollView
-          alwaysBounceVertical={false}
-          contentContainerStyle={styles.configurationContent}
-          contentInsetAdjustmentBehavior="automatic"
-          showsVerticalScrollIndicator={false}
-          style={styles.screen}
-        >
-          {isProviderDetailLoading ? (
-            <View className="items-center py-10">
-              <Spinner accessibilityLabel={t('settings.provider.loading')} />
-            </View>
-          ) : (
-            // Still gated as one commit: #467 kept the Base URL / API keys blocks
-            // out until all three queries land so the content never grows under a
-            // finger that already aimed at the toolbar.
-            <>
-              <ProviderApiManagementSection
-                apiKeysInput={apiKeysInput}
-                baseUrl={getProviderPrimaryBaseUrl(provider)}
-                provider={provider}
-                showApiKeys={showApiKeys}
-                showBaseUrl={canEditEndpoint}
-                onApiKeysCommit={commitApiKeys}
-                onApiKeysManagePress={openApiKeySettings}
-                onBaseUrlCommit={commitBaseUrl}
-                onBaseUrlManagePress={openEndpointSettings}
-              />
-              <ProviderModelCheckSection
-                apiKeys={apiKeys}
-                isLoading={modelsQuery.isPending}
-                models={models}
-                provider={provider}
-                providerId={providerId}
-              />
-            </>
-          )}
-        </ScrollView>
+        <>
+          {/* Heads the configuration rather than the page: the header carries
+              the tabs, and the models tab is a list of rows shaped like this
+              one, where a provider row would read as a model. */}
+          <ProviderDetailBanner
+            isActive={provider?.isEnabled ?? false}
+            isDisabled={!provider || updateProviderEnabledMutation.isPending}
+            onToggleActive={handleToggleProvider}
+            provider={provider}
+            providerId={providerId}
+            providerName={providerName}
+          />
+          <ScrollView
+            alwaysBounceVertical={false}
+            contentContainerStyle={styles.configurationContent}
+            contentInsetAdjustmentBehavior="automatic"
+            showsVerticalScrollIndicator={false}
+            style={styles.screen}
+          >
+            {isProviderDetailLoading ? (
+              <View className="items-center py-10">
+                <Spinner accessibilityLabel={t('settings.provider.loading')} />
+              </View>
+            ) : (
+              // Still gated as one commit: #467 kept the Base URL / API keys blocks
+              // out until all three queries land so the content never grows under a
+              // finger that already aimed at the toolbar.
+              <>
+                <View className="gap-3">
+                  {canEditEndpoint ? (
+                    <ProviderApiServiceEndpointField
+                      baseUrl={getProviderPrimaryBaseUrl(provider)}
+                      onCommit={commitBaseUrl}
+                    />
+                  ) : null}
+                  {showApiKeys ? (
+                    <ProviderApiServiceApiKeysField
+                      apiKeysInput={apiKeysInput}
+                      onCommit={commitApiKeys}
+                    />
+                  ) : null}
+                </View>
+                <ProviderModelCheckSection
+                  apiKeys={apiKeys}
+                  isLoading={modelsQuery.isPending}
+                  models={models}
+                  provider={provider}
+                  providerId={providerId}
+                />
+              </>
+            )}
+          </ScrollView>
+        </>
       ) : (
         <ProviderModelList
+          addAction={addAction}
           isDefaultModel={isDefaultModel}
           isLoading={modelsQuery.isPending}
           models={models}
           provider={provider}
-          pullAction={pullAction}
+          pullAction={modelPullAction}
           selection={modelListSelection}
         />
       )}
       {/* Mounted from the first frame — installing a bottom toolbar later is a
           native nav-item change, which is what the loading branch used to do. */}
       <ProviderDetailChrome
-        canDelete={provider ? providers.canRemove(provider) : false}
-        editAction={
-          activeTab === 'models' && selectableIds.length > 0
-            ? { isDisabled: false, onPress: modelSelection.enterEditing }
-            : undefined
-        }
-        isActive={provider?.isEnabled ?? false}
-        isDisabled={
-          !provider || updateProviderEnabledMutation.isPending || deleteProviderMutation.isLoading
-        }
-        onDelete={requestDeleteProvider}
-        onToggleActive={handleToggleProvider}
-        pullAction={pullAction}
         selection={
           modelSelection.isEditing
             ? {
@@ -481,7 +436,10 @@ const styles = StyleSheet.create({
     gap: 20,
     paddingBottom: 96,
     paddingHorizontal: 16,
-    paddingTop: 20,
+    // No top padding: the banner above already carries the gap, and doubling it
+    // would set the first field further from the banner than the fields are
+    // from each other.
+    paddingTop: 0,
   },
   screen: {
     flex: 1,

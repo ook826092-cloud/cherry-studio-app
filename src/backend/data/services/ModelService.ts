@@ -1,29 +1,28 @@
+import { and, asc, eq, inArray, type SQL } from 'drizzle-orm';
+
+import { application } from '@/backend/core/application/Application';
+import type { InsertUserModelRow, UserModelRow } from '@/backend/data/db/schemas/userModel';
+import { userModelTable } from '@/backend/data/db/schemas/userModel';
+import { DataApiErrorFactory, ErrorCode } from '@/shared/data/api/errors';
 import type {
   CreateModelDto,
   ListModelsQuery,
   UpdateModelDto,
-} from '@cherrystudio/universal/data/api/schemas/models';
-import { DataApiErrorFactory, ErrorCode } from '@cherrystudio/universal/data/api/types';
-import { deepEqual } from '@cherrystudio/universal/data/cache/cacheUtils';
+} from '@/shared/data/api/schemas/models';
 import {
   CHERRYAI_DEFAULT_UNIQUE_MODEL_ID,
   CHERRYAI_PROVIDER_ID,
   isManagedCherryAiDefaultModel,
-} from '@cherrystudio/universal/data/presets/cherryai';
+} from '@/shared/data/presets/cherryai';
 import {
   createUniqueModelId,
   type EndpointType,
   type Model,
   parseUniqueModelId,
   type UniqueModelId,
-} from '@cherrystudio/universal/data/types/model';
-import { and, asc, eq, inArray, type SQL } from 'drizzle-orm';
+} from '@/shared/data/types/model';
+import { deepEqual } from '@/shared/utils/deepEqual';
 
-import { application } from '@/backend/core/application/Application';
-import type { InsertUserModelRow, UserModelRow } from '@/backend/data/db/schemas/userModel';
-import { userModelTable } from '@/backend/data/db/schemas/userModel';
-
-import { pinService } from './PinService';
 import {
   createCustomModel,
   type ModelRegistryLookup,
@@ -478,7 +477,6 @@ export class ModelService {
       if (rows.length === 0) {
         throw DataApiErrorFactory.notFound('Model', `${providerId}/${modelId}`);
       }
-      await pinService.purgeForEntitiesTx(tx, 'model', [rows[0].id]);
     });
   }
 
@@ -513,16 +511,10 @@ export class ModelService {
         throw DataApiErrorFactory.notFound('Model', missingId);
       }
 
-      const deletedIds: string[] = [];
       for (const idChunk of chunks(ids, sqliteBatchSize)) {
         // react-doctor-disable-next-line async-await-in-loop -- chunks avoid SQLite's variable limit
-        const rows = await tx
-          .delete(userModelTable)
-          .where(inArray(userModelTable.id, idChunk))
-          .returning({ id: userModelTable.id });
-        deletedIds.push(...rows.map((row: { id: string }) => row.id));
+        await tx.delete(userModelTable).where(inArray(userModelTable.id, idChunk));
       }
-      await pinService.purgeForEntitiesTx(tx, 'model', deletedIds);
     });
   }
 
@@ -689,10 +681,6 @@ export class ModelService {
           .returning({ id: userModelTable.id });
         removedIds.push(...rows.map((row: { id: string }) => row.id));
       }
-      if (removedIds.length > 0) {
-        await pinService.purgeForEntitiesTx(tx, 'model', removedIds);
-      }
-
       const inserted: UserModelRow[] = [];
       const insertableValues = values.filter((value) => !protectedIds.has(value.id));
       for (const valueChunk of chunks(insertableValues, getInsertBatchSize(insertableValues))) {

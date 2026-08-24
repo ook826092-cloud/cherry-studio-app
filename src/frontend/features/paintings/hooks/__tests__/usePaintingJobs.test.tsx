@@ -1,10 +1,10 @@
-import type { JobSnapshot } from '@cherrystudio/universal/data/api/schemas/jobs';
-import type { ApiClient } from '@cherrystudio/universal/data/api/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { DataApiProvider } from '@/frontend/data/DataApiProvider';
+import type { JobSnapshot } from '@/shared/data/api/schemas/jobs';
+import type { ApiClient } from '@/shared/data/api/types';
 
 import { paintingJobFailureMessage, usePaintingJobs } from '../usePaintingJobs';
 
@@ -25,7 +25,6 @@ function jobSnapshot(overrides: Partial<JobSnapshot>): JobSnapshot {
     priority: 0,
     queue: 'painting',
     scheduledAt: '2026-01-01T00:00:00.000Z',
-    scheduleId: null,
     startedAt: null,
     status: 'running',
     timeoutMs: null,

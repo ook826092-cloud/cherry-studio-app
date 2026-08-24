@@ -1,14 +1,11 @@
 import { ENDPOINT_TYPE } from '@cherrystudio/provider-registry';
-import {
-  type Assistant,
-  DEFAULT_ASSISTANT_SETTINGS,
-} from '@cherrystudio/universal/data/types/assistant';
-import type { Model } from '@cherrystudio/universal/data/types/model';
-import type { Provider } from '@cherrystudio/universal/data/types/provider';
 
 import type { AiServiceDependencies } from '@/backend/ai/AiService';
 import type { ToolEntry } from '@/backend/ai/tools';
 import { ToolResolver } from '@/backend/ai/tools/ToolResolver';
+import { type Assistant, DEFAULT_ASSISTANT_SETTINGS } from '@/shared/data/types/assistant';
+import type { Model } from '@/shared/data/types/model';
+import type { Provider } from '@/shared/data/types/provider';
 
 type ContractFixtureOptions = {
   assistantPrompt?: string;
@@ -69,7 +66,6 @@ export function createContractFixture(options: ContractFixtureOptions = {}) {
       return null;
     }),
     getMultipleRawCached: jest.fn(() => ({
-      'chat.web_search.exclude_domains': [],
       'chat.web_search.max_results': 5,
     })),
   };
@@ -171,9 +167,7 @@ function createAssistant(modelId: Model['id'], overrides: Partial<Assistant> = {
     createdAt: '2026-01-01T00:00:00.000Z',
     description: '',
     emoji: '',
-    groupId: null,
     id: '00000000-0000-4000-8000-000000000001',
-    knowledgeBaseIds: [],
     mcpServerIds: [],
     modelId,
     modelName: null,
@@ -181,7 +175,6 @@ function createAssistant(modelId: Model['id'], overrides: Partial<Assistant> = {
     orderKey: 'a0',
     prompt: '',
     settings: DEFAULT_ASSISTANT_SETTINGS,
-    tags: [],
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   };

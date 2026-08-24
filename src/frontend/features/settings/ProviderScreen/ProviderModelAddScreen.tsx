@@ -1,9 +1,9 @@
+import ChevronDownIcon from '@cherrystudio/app-icons/icons/chevron-down';
+import ChevronUpIcon from '@cherrystudio/app-icons/icons/chevron-up';
+import SaveIcon from '@cherrystudio/app-icons/icons/save';
 import { FieldError, Input, Label, TextField } from '@cherrystudio/ui/components';
 import { cn } from '@cherrystudio/ui/utils';
-import type { EndpointType } from '@cherrystudio/universal/data/types/model';
-import type { Provider } from '@cherrystudio/universal/data/types/provider';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronDownIcon, ChevronUpIcon, SaveIcon } from 'lucide-uniwind/png';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, type TextInputProps, View } from 'react-native';
@@ -12,7 +12,9 @@ import {
   type KeyboardAwareScrollViewRef,
 } from 'react-native-keyboard-controller';
 
-import { BackHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
+import { RouteHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
+import type { EndpointType } from '@/shared/data/types/model';
+import type { Provider } from '@/shared/data/types/provider';
 
 import { useProviderDetailSettings } from './detail';
 import { useProviderModelAdd } from './models/hooks/useProviderModelAdd';
@@ -40,7 +42,7 @@ export default function ProviderModelAddScreen() {
   // controls exist, and that block sits directly above the
   // "More settings" control — growing it a commit later moves a live tap target.
   if (!provider) {
-    return <BackHeader title={t('settings.provider.models.addTitle')} />;
+    return <RouteHeader title={t('settings.provider.models.addTitle')} />;
   }
 
   return <ProviderModelAddForm provider={provider} />;
@@ -135,11 +137,11 @@ function ProviderModelAddForm({ provider }: { provider: Provider }) {
     () => [
       {
         accessibilityLabel: t('common.save'),
-        androidIcon: SaveIcon,
         disabled: isSubmitting || !canSubmit,
-        icon: 'checkmark',
+        icon: SaveIcon,
         key: 'save-model',
         onPress: () => void handleSubmit(),
+        type: 'icon',
       },
     ],
     [canSubmit, handleSubmit, isSubmitting, t],
@@ -149,7 +151,7 @@ function ProviderModelAddForm({ provider }: { provider: Provider }) {
 
   return (
     <>
-      <BackHeader rightActions={rightActions} title={t('settings.provider.models.addTitle')} />
+      <RouteHeader rightActions={rightActions} title={t('settings.provider.models.addTitle')} />
       <View className="flex-1">
         <KeyboardAwareScrollView
           bottomOffset={
@@ -272,9 +274,9 @@ function ProviderModelAddForm({ provider }: { provider: Provider }) {
               {t('settings.provider.models.addMoreSettings')}
             </Text>
             {showMoreSettings ? (
-              <ChevronUpIcon className="size-4 text-foreground" strokeWidth={2} />
+              <ChevronUpIcon className="size-4 text-foreground" />
             ) : (
-              <ChevronDownIcon className="size-4 text-foreground" strokeWidth={2} />
+              <ChevronDownIcon className="size-4 text-foreground" />
             )}
           </Pressable>
 
@@ -340,7 +342,7 @@ function ProviderModelAddTextField({
 }) {
   return (
     <TextField isDisabled={isDisabled} isInvalid={Boolean(errorMessage)}>
-      <Label>{label}</Label>
+      <Label className="text-foreground">{label}</Label>
       <Input
         accessibilityLabel={accessibilityLabel}
         autoCapitalize="none"
@@ -417,15 +419,14 @@ function EndpointTypeChip({
       accessibilityState={{ checked: isSelected, disabled: isDisabled }}
       className={cn(
         'h-8 flex-row items-center gap-1 rounded-full px-3 active:opacity-70 disabled:opacity-40',
-        isSelected ? 'bg-primary/10' : 'border border-border bg-secondary',
+        isSelected
+          ? 'border border-border-strong bg-secondary'
+          : 'border border-border bg-secondary',
       )}
       disabled={isDisabled}
       onPress={onPress}
     >
-      <Text
-        className={cn('font-medium text-sm', isSelected ? 'text-primary' : 'text-foreground')}
-        numberOfLines={1}
-      >
+      <Text className="font-medium text-foreground text-sm" numberOfLines={1}>
         {label}
       </Text>
     </Pressable>

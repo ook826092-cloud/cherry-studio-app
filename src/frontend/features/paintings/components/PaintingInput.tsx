@@ -1,9 +1,6 @@
+import Settings2Icon from '@cherrystudio/app-icons/icons/settings-2';
 import { type ImageGenerationMode, MODEL_CAPABILITY } from '@cherrystudio/provider-registry';
 import { Composer } from '@cherrystudio/ui/components';
-import { resolveIcon } from '@cherrystudio/ui/icons';
-import { isUniqueModelId, type UniqueModelId } from '@cherrystudio/universal/data/types/model';
-import type { Painting } from '@cherrystudio/universal/data/types/painting';
-import { Settings2Icon } from 'lucide-uniwind/png';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -19,9 +16,12 @@ import {
 } from '@/frontend/components/composer';
 import {
   ModelPickerBottomSheet,
+  ModelPickerIcon,
   type ModelPickerModelItem,
 } from '@/frontend/components/modelPicker';
 import { useModelById, useModels, useProviders } from '@/frontend/hooks/chat';
+import { isUniqueModelId, type UniqueModelId } from '@/shared/data/types/model';
+import type { Painting } from '@/shared/data/types/painting';
 
 import type {
   PaintingGenerationInput,
@@ -87,12 +87,6 @@ export function PaintingInput({
   );
   const selectedProvider = selectedModel
     ? enabledProviders.find((provider) => provider.id === selectedModel.providerId)
-    : undefined;
-  const selectedModelIcon = selectedModel
-    ? resolveIcon(
-        selectedModel.modelId,
-        selectedProvider?.presetProviderId ?? selectedModel.providerId,
-      )
     : undefined;
   const selectedModelLabel = selectedModel?.name ?? historicalModelLabel(painting);
   const imageAttachmentCount =
@@ -163,7 +157,7 @@ export function PaintingInput({
   );
   const handleSend = useCallback(
     async ({ attachments, text }: ComposerSendPayload) => {
-      if (!selectedModelId || !isSelectedModelAvailable) {
+      if (!selectedModelId || !selectedModel || !isSelectedModelAvailable) {
         throw new Error('Select an available image generation model');
       }
       const submittedImageCount = attachments.filter(
@@ -205,6 +199,7 @@ export function PaintingInput({
         attachments,
         mode,
         modelId: selectedModelId,
+        modelName: selectedModel.name,
         paramValues: submittedValues,
         prompt: text,
       });
@@ -218,6 +213,7 @@ export function PaintingInput({
       onGenerated,
       paramValues,
       selectedModel?.imageGeneration,
+      selectedModel?.name,
       selectedModelId,
     ],
   );
@@ -256,11 +252,20 @@ export function PaintingInput({
               onPress={openSettings}
               testID="painting-input-settings-button"
             >
-              <Settings2Icon className="size-4 text-foreground" strokeWidth={2} />
+              <Settings2Icon className="size-4 text-foreground" />
             </Composer.Action>
           ) : null}
           <ComposerModelPill
-            icon={selectedModelIcon}
+            icon={
+              selectedModel ? (
+                <ModelPickerIcon
+                  model={selectedModel}
+                  provider={selectedProvider}
+                  providerIconSize={18}
+                  size={20}
+                />
+              ) : undefined
+            }
             label={selectedModelLabel}
             onPress={() => setIsModelPickerOpen(true)}
           />
@@ -282,7 +287,6 @@ export function PaintingInput({
           onSelect={handleModelSelect}
           selectedModelId={selectedModelId}
           selectedTags={[MODEL_CAPABILITY.IMAGE_GENERATION]}
-          showPinnedModels={false}
         />
       ) : null}
     </>

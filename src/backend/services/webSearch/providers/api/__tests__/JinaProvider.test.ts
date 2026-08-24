@@ -1,13 +1,10 @@
-import type { WebSearchProvider } from '@cherrystudio/universal/data/preference';
-import type { WebSearchExecutionConfig } from '@cherrystudio/universal/data/types/webSearch';
-
 import { ApiKeyRotationState } from '@/backend/services/webSearch/utils/provider';
+import type { WebSearchProvider, WebSearchExecutionConfig } from '@/shared/data/types/webSearch';
 
 import { JinaProvider } from '../JinaProvider';
 
 const config: WebSearchExecutionConfig = {
   compression: { cutoffLimit: 2000, method: 'none' },
-  excludeDomains: [],
   maxResults: 5,
 };
 

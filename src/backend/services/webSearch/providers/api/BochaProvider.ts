@@ -1,8 +1,6 @@
-import type {
-  WebSearchExecutionConfig,
-  WebSearchResponse,
-} from '@cherrystudio/universal/data/types/webSearch';
 import * as z from 'zod';
+
+import type { WebSearchExecutionConfig, WebSearchResponse } from '@/shared/data/types/webSearch';
 
 import { BaseWebSearchProvider } from '../base/BaseWebSearchProvider';
 import type { ApiKeyRequestSearchContext } from '../base/context';
@@ -10,7 +8,6 @@ import type { ApiKeyRequestSearchContext } from '../base/context';
 const BochaSearchParamsSchema = z.object({
   query: z.string(),
   count: z.number().int().positive(),
-  exclude: z.string(),
   summary: z.boolean(),
 });
 
@@ -62,7 +59,6 @@ export class BochaProvider extends BaseWebSearchProvider {
       requestBody: BochaSearchParamsSchema.parse({
         query,
         count: config.maxResults,
-        exclude: config.excludeDomains.join(','),
         summary: true,
       }),
       signal: httpOptions?.signal ?? undefined,

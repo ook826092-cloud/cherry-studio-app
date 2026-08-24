@@ -1,8 +1,9 @@
-import { ArrowUpIcon, SquareIcon } from 'lucide-uniwind/png';
+import ArrowUpIcon from '@cherrystudio/app-icons/icons/arrow-up';
+import SquareIcon from '@cherrystudio/app-icons/icons/square';
 
 import { cn } from '../../../utils';
-import { useComposerActions, useComposerState } from '../composer.context';
 import type { ComposerSendProps } from '../composer.types';
+import { useComposerActions, useComposerState } from '../hooks/use-composer-context';
 import { ComposerAction } from './composer-action';
 
 // Pins itself right, so tools written before it in the toolbar pack left and
@@ -51,7 +52,6 @@ export function ComposerSend({ testID }: ComposerSendProps) {
           isActive ? 'text-primary-foreground' : 'text-muted-foreground',
           isStopping ? 'size-4' : 'size-6',
         )}
-        strokeWidth={2}
       />
     </ComposerAction>
   );

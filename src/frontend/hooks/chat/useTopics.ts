@@ -1,8 +1,7 @@
-import type { UpdateTopicDto } from '@cherrystudio/universal/data/api/schemas/topics';
-import type { Topic } from '@cherrystudio/universal/data/types/topic';
 import { useCallback, useMemo } from 'react';
 
 import { useInfiniteQuery, useMutation, useQuery } from '@/frontend/data';
+import type { TopicListItem, UpdateTopicDto } from '@/shared/data/api/schemas/topics';
 
 import { useHydrateTopicDetails } from './useHydrateTopicDetails';
 
@@ -11,9 +10,10 @@ export type TopicsOptions = {
 };
 
 export type TopicsViewModel = {
+  error?: Error;
   isLoadingInitial: boolean;
   loadMore: () => Promise<void>;
-  topics: readonly Topic[];
+  topics: readonly TopicListItem[];
 };
 
 const defaultPageSize = 50;
@@ -30,6 +30,7 @@ export function useTopics(options: TopicsOptions): TopicsViewModel {
   useHydrateTopicDetails(topics);
 
   return {
+    error: query.error,
     isLoadingInitial: query.isLoading,
     loadMore: query.loadNext,
     topics,

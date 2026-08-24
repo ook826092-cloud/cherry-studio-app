@@ -1,26 +1,23 @@
+import DownloadIcon from '@cherrystudio/app-icons/icons/download';
+import EllipsisIcon from '@cherrystudio/app-icons/icons/ellipsis';
+import type { MenuItem } from '@cherrystudio/ui/components';
 import { Stack } from 'expo-router';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { SFSymbol } from 'sf-symbols-typescript';
+
+import {
+  HeaderChrome,
+  type HeaderToolbarAction,
+  useRouteHeaderLeadingAction,
+} from '@/frontend/components/headers';
 
 import type { PaintingViewerChromeProps } from './PaintingViewerChrome.types';
 
-// Native aspect-ratio glyph per ratio. iOS ships `rectangle.ratio.W.to.H`
-// symbols, so the menu shows a shape that matches each option (1:1 falls back to
-// `square`). Android drops SF Symbols, so its menu stays text-only by design.
-const ASPECT_RATIO_ICONS: Record<string, SFSymbol> = {
-  '1:1': 'square',
-  '3:4': 'rectangle.ratio.3.to.4',
-  '4:3': 'rectangle.ratio.4.to.3',
-  '9:16': 'rectangle.ratio.9.to.16',
-  '16:9': 'rectangle.ratio.16.to.9',
-};
-
-// Native iOS 26 liquid-glass toolbars: X on the left, download + more menu on
-// the right, edit + resize menu in the bottom toolbar. Rendered from the screen
-// (a page component) so placement="bottom" is allowed.
+// The top actions use the app-wide white HeaderAction surface. The editing
+// actions stay in the native iOS bottom toolbar, which is a different control
+// region. Rendered from the screen so placement="bottom" is allowed.
 export function PaintingViewerChrome({
   aspectRatios,
-  onClose,
   onDelete,
   onDownload,
   onEdit,
@@ -28,44 +25,55 @@ export function PaintingViewerChrome({
   onViewConversation,
 }: PaintingViewerChromeProps) {
   const { t } = useTranslation();
+  const leadingAction = useRouteHeaderLeadingAction();
+  const overflowMenuItems = useMemo<readonly MenuItem[]>(
+    () => [
+      {
+        id: 'view-conversation',
+        label: t('painting.viewer.viewConversation'),
+        onPress: onViewConversation,
+      },
+      {
+        destructive: true,
+        id: 'delete',
+        label: t('painting.viewer.delete'),
+        onPress: onDelete,
+      },
+    ],
+    [onDelete, onViewConversation, t],
+  );
+  const leftActions = useMemo<HeaderToolbarAction[]>(() => [leadingAction], [leadingAction]);
+  const rightActions = useMemo<HeaderToolbarAction[]>(
+    () => [
+      {
+        accessibilityLabel: t('painting.viewer.download'),
+        icon: DownloadIcon,
+        key: 'download',
+        onPress: onDownload,
+        type: 'icon',
+      },
+      {
+        accessibilityLabel: t('painting.viewer.more'),
+        icon: EllipsisIcon,
+        items: overflowMenuItems,
+        key: 'more',
+        type: 'menu',
+      },
+    ],
+    [onDownload, overflowMenuItems, t],
+  );
 
   return (
     <>
-      <Stack.Toolbar placement="left">
-        <Stack.Toolbar.Button
-          accessibilityLabel={t('painting.viewer.close')}
-          icon="xmark"
-          onPress={onClose}
-        />
-      </Stack.Toolbar>
-      <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Button
-          accessibilityLabel={t('painting.viewer.download')}
-          icon="square.and.arrow.down"
-          onPress={onDownload}
-        />
-        <Stack.Toolbar.Menu accessibilityLabel={t('painting.viewer.more')} icon="ellipsis">
-          <Stack.Toolbar.MenuAction icon="message" onPress={onViewConversation}>
-            {t('painting.viewer.viewConversation')}
-          </Stack.Toolbar.MenuAction>
-          <Stack.Toolbar.MenuAction destructive icon="trash" onPress={onDelete}>
-            {t('painting.viewer.delete')}
-          </Stack.Toolbar.MenuAction>
-        </Stack.Toolbar.Menu>
-      </Stack.Toolbar>
+      <HeaderChrome leftActions={leftActions} rightActions={rightActions} />
       <Stack.Toolbar placement="bottom">
-        <Stack.Toolbar.Button
-          accessibilityLabel={t('painting.viewer.edit')}
-          icon="pencil"
-          onPress={onEdit}
-        />
-        <Stack.Toolbar.Menu accessibilityLabel={t('painting.viewer.resize')} icon="aspectratio">
+        <Stack.Toolbar.Button accessibilityLabel={t('painting.viewer.edit')} onPress={onEdit}>
+          {t('painting.viewer.edit')}
+        </Stack.Toolbar.Button>
+        <Stack.Toolbar.Menu accessibilityLabel={t('painting.viewer.resize')}>
+          <Stack.Toolbar.Label>{t('painting.viewer.resize')}</Stack.Toolbar.Label>
           {aspectRatios.map((ratio) => (
-            <Stack.Toolbar.MenuAction
-              icon={ASPECT_RATIO_ICONS[ratio]}
-              key={ratio}
-              onPress={() => onResizeSelect(ratio)}
-            >
+            <Stack.Toolbar.MenuAction key={ratio} onPress={() => onResizeSelect(ratio)}>
               {ratio}
             </Stack.Toolbar.MenuAction>
           ))}

@@ -3,15 +3,7 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 import { ENDPOINT_TYPE } from '@cherrystudio/provider-registry';
-import {
-  CHERRYAI_API_BASE_URL,
-  CHERRYAI_DEFAULT_MODEL_GROUP,
-  CHERRYAI_DEFAULT_MODEL_ID,
-  CHERRYAI_DEFAULT_MODEL_NAME,
-  CHERRYAI_DEFAULT_UNIQUE_MODEL_ID,
-  CHERRYAI_PROVIDER_ID,
-} from '@cherrystudio/universal/data/presets/cherryai';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/sqlite-proxy';
 
 import type { Database, DbService } from '@/backend/data/db/DbService';
@@ -21,6 +13,14 @@ import {
   userModelTable,
   userProviderTable,
 } from '@/backend/data/db/schemas';
+import {
+  CHERRYAI_API_BASE_URL,
+  CHERRYAI_DEFAULT_MODEL_GROUP,
+  CHERRYAI_DEFAULT_MODEL_ID,
+  CHERRYAI_DEFAULT_MODEL_NAME,
+  CHERRYAI_DEFAULT_UNIQUE_MODEL_ID,
+  CHERRYAI_PROVIDER_ID,
+} from '@/shared/data/presets/cherryai';
 
 import {
   CherryAiDefaultModelSeeder,
@@ -154,7 +154,7 @@ describe('CherryAiDefaultModelSeeder', () => {
     const [preference] = await database
       .select({ value: preferenceTable.value })
       .from(preferenceTable)
-      .where(and(eq(preferenceTable.scope, 'default'), eq(preferenceTable.key, key)))
+      .where(eq(preferenceTable.key, key))
       .limit(1);
     return preference?.value;
   }

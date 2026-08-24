@@ -1,15 +1,17 @@
+import CameraIcon from '@cherrystudio/app-icons/icons/camera';
+import FileIcon from '@cherrystudio/app-icons/icons/file';
+import ImagesIcon from '@cherrystudio/app-icons/icons/images';
 import { Composer } from '@cherrystudio/ui/components';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { CameraIcon, FileIcon, ImagesIcon } from 'lucide-uniwind/png';
 import { type PropsWithChildren, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
-import { KeyboardController } from 'react-native-keyboard-controller';
 
 import { loggerService } from '@/shared/core/logger/LoggerService';
 
 import { useComposerActions } from '../context/ComposerProvider';
+import { useComposerFieldDismiss } from '../hooks/useComposerFieldDismiss';
 import {
   COMPOSER_PHOTO_SELECTION_LIMIT,
   createCameraAttachmentDraft,
@@ -26,20 +28,26 @@ const logger = loggerService.withContext('ComposerMenu');
  *
  * `children` are `Composer.Menu.Item`s — chat puts its tools there; painting
  * has nothing to add, so its menu is media only.
+ *
+ * Opening it leaves the keyboard **up**. Choosing camera, photos, or files
+ * closes the menu, dismisses and blurs the field, then opens the system picker;
+ * caller-owned tool rows only close the menu and keep the input context live.
+ *
+ * The menu used to take the keyboard down when it opened so
+ * the panel could grow into that space, but the panel is portalled and anchored
+ * to where the trigger was measured *before* the dismissal — so the composer
+ * dropped ~290pt while the panel stayed put, and the menu ended up floating in
+ * the middle of the screen with nothing under it. The panel grows upward out of
+ * the ＋ button and clears the keyboard on its own, so it never needed that
+ * space.
  */
 export function ComposerMenu({ children }: PropsWithChildren) {
   const { t } = useTranslation();
   const { addAttachments } = useComposerActions();
+  const dismissField = useComposerFieldDismiss();
 
-  const handleOpenChange = useCallback((isOpen: boolean) => {
-    // The panel grows into the space the keyboard would occupy, so it takes the
-    // keyboard down. The field stays first responder, which is what makes iOS
-    // restore the keyboard the instant the menu closes.
-    if (isOpen) {
-      void KeyboardController.dismiss();
-    }
-  }, []);
   const openCamera = useCallback(async () => {
+    await dismissField();
     const permission = await ImagePicker.requestCameraPermissionsAsync();
 
     if (!permission.granted) {
@@ -53,8 +61,9 @@ export function ComposerMenu({ children }: PropsWithChildren) {
     }
 
     addAttachments(result.assets.map((asset) => createCameraAttachmentDraft({ uri: asset.uri })));
-  }, [addAttachments]);
+  }, [addAttachments, dismissField]);
   const openPhotoLibrary = useCallback(async () => {
+    await dismissField();
     // `false` means "don't ask for write access". Limited access needs no
     // special handling here: the picker runs out of process and returns what
     // was chosen in it, whether or not the app can see the rest of the library.
@@ -68,6 +77,8 @@ export function ComposerMenu({ children }: PropsWithChildren) {
       allowsMultipleSelection: true,
       mediaTypes: ['images'],
       orderedSelection: true,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
       quality: 1,
       selectionLimit: COMPOSER_PHOTO_SELECTION_LIMIT,
     });
@@ -91,8 +102,9 @@ export function ComposerMenu({ children }: PropsWithChildren) {
         };
       }),
     );
-  }, [addAttachments]);
+  }, [addAttachments, dismissField]);
   const openDocumentPicker = useCallback(async () => {
+    await dismissField();
     const result = await DocumentPicker.getDocumentAsync({
       copyToCacheDirectory: true,
       multiple: true,
@@ -104,7 +116,7 @@ export function ComposerMenu({ children }: PropsWithChildren) {
     }
 
     addAttachments(result.assets.map(createDocumentAttachmentDraft));
-  }, [addAttachments]);
+  }, [addAttachments, dismissField]);
   // A picker that fails to open leaves no trace otherwise: the menu has already
   // closed, so the gesture just looks ignored.
   const present = useCallback((label: string, open: () => Promise<void>) => {
@@ -114,23 +126,19 @@ export function ComposerMenu({ children }: PropsWithChildren) {
   }, []);
 
   return (
-    <Composer.Menu
-      accessibilityLabel={t('chat.media.attach')}
-      onOpenChange={handleOpenChange}
-      testID="composer-menu"
-    >
+    <Composer.Menu accessibilityLabel={t('chat.media.attach')} testID="composer-menu">
       <Composer.Menu.Item
-        icon={<CameraIcon className="size-5 text-foreground" strokeWidth={2} />}
+        icon={<CameraIcon className="size-5 text-foreground" />}
         label={t('chat.media.camera')}
         onPress={() => present('camera', openCamera)}
       />
       <Composer.Menu.Item
-        icon={<ImagesIcon className="size-5 text-foreground" strokeWidth={2} />}
+        icon={<ImagesIcon className="size-5 text-foreground" />}
         label={t('chat.media.photos')}
         onPress={() => present('photo', openPhotoLibrary)}
       />
       <Composer.Menu.Item
-        icon={<FileIcon className="size-5 text-foreground" strokeWidth={2} />}
+        icon={<FileIcon className="size-5 text-foreground" />}
         label={t('chat.media.file')}
         onPress={() => present('document', openDocumentPicker)}
       />

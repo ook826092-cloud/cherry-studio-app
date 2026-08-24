@@ -1,7 +1,7 @@
-import { type FontSizeStep, ThemeMode } from '@cherrystudio/universal/data/preference';
+import { createTypographyCSSVariables } from '@cherrystudio/ui/utils';
 import { Uniwind } from 'uniwind';
 
-import { createTypographyCSSVariables } from './typographyScale';
+import { type FontSizeStep, ThemeMode } from '@/shared/data/preference';
 
 /**
  * The primary-colour half of this module used to live here: `DEFAULT_PRIMARY_COLOR`,

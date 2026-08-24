@@ -1,12 +1,13 @@
+import ChevronDownIcon from '@cherrystudio/app-icons/icons/chevron-down';
+import EllipsisIcon from '@cherrystudio/app-icons/icons/ellipsis';
 import { resolveIcon, resolveProviderIcon } from '@cherrystudio/ui/icons';
 import { LegendList, type LegendListRenderItemProps } from '@legendapp/list/react-native';
-import { ChevronDownIcon, EllipsisIcon } from 'lucide-uniwind/png';
 import { type ReactElement, type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useUniwind } from 'uniwind';
 
-import { BrandAvatar, BrandAvatarIcon } from '@/frontend/components/BrandAvatar';
+import { BrandAvatar, BrandAvatarIcon } from '@/frontend/components/avatar';
 
 import type { AiUsageRankingItem } from '../types';
 import { displayAiUsageModelId } from '../utils/aiUsageDetail';
@@ -101,8 +102,8 @@ export function AiUsageRankingList({
               testID="ai-usage-show-more"
               onPress={() => setVisibleCount((count) => count + AI_USAGE_RANKING_PAGE_SIZE)}
             >
-              <Text className="font-medium text-primary text-sm">{t('aiUsage.showMore')}</Text>
-              <ChevronDownIcon className="size-4 text-primary" strokeWidth={2} />
+              <Text className="font-medium text-foreground text-sm">{t('aiUsage.showMore')}</Text>
+              <ChevronDownIcon className="size-4 text-foreground" />
             </Pressable>
           </View>
         ) : null
@@ -241,7 +242,7 @@ function AiUsageRankingIcon({ item, label }: { item: AiUsageRankingItem; label: 
   if (item.isOther) {
     return (
       <BrandAvatar {...frameProps}>
-        <EllipsisIcon className="size-4 text-muted-foreground" strokeWidth={2} />
+        <EllipsisIcon className="size-4 text-muted-foreground" />
       </BrandAvatar>
     );
   }

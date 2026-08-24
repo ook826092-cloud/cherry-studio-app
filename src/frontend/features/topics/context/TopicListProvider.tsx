@@ -1,5 +1,3 @@
-import type { CursorPaginationResponse } from '@cherrystudio/universal/data/api/types';
-import type { Topic } from '@cherrystudio/universal/data/types/topic';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 import { createContext, type PropsWithChildren, use, useCallback, useMemo } from 'react';
 
@@ -10,16 +8,18 @@ import {
   restoreQuerySnapshot,
   updateQueriesOptimistically,
 } from '@/frontend/data/utils/optimisticQueryUpdate';
-import { usePins, useTopics } from '@/frontend/hooks/chat';
+import { useTopics } from '@/frontend/hooks/chat';
 import { getMessagesQueryKey } from '@/frontend/hooks/chat/utils/messageQueryOptions';
+import type { TopicListItem } from '@/shared/data/api/schemas/topics';
+import type { CursorPaginationResponse } from '@/shared/data/api/types';
+import type { Topic } from '@/shared/data/types/topic';
 
-type TopicListData = InfiniteData<CursorPaginationResponse<Topic>, string | undefined>;
+type TopicListData = InfiniteData<CursorPaginationResponse<TopicListItem>, string | undefined>;
 
 type TopicListTopicsContextValue = {
-  isPinActionDisabled: boolean;
   isTopicListLoading: boolean;
-  pinnedTopicIds: readonly string[];
-  topics: readonly Topic[];
+  topicQueryError?: Error;
+  topics: readonly TopicListItem[];
 };
 
 type TopicListActionsContextValue = {
@@ -27,7 +27,6 @@ type TopicListActionsContextValue = {
   deleteTopics: (topicIds: readonly string[]) => Promise<void>;
   loadMoreTopics: () => void;
   renameTopic: (topicId: string, name: string) => Promise<void>;
-  toggleTopicPin: (topicId: string) => Promise<void>;
 };
 
 const TopicListTopicsContext = createContext<TopicListTopicsContextValue | null>(null);
@@ -40,9 +39,6 @@ type TopicListProviderProps = PropsWithChildren<{
 export function TopicListProvider({ children, searchText = '' }: TopicListProviderProps) {
   const queryClient = useQueryClient();
   const topicList = useTopics({ q: searchText });
-  const topicPins = usePins('topic');
-  const togglePin = topicPins.togglePin;
-  const isPinActionDisabled = topicPins.isLoading || topicPins.isRefreshing || topicPins.isMutating;
 
   const renameTopicMutation = useMutation('PATCH', '/topics/:id', {
     onMutate: async (variables) => {
@@ -143,26 +139,13 @@ export function TopicListProvider({ children, searchText = '' }: TopicListProvid
     [queryClient, removeTopics],
   );
 
-  const toggleTopicPin = useCallback(
-    async (topicId: string) => {
-      if (isPinActionDisabled) {
-        return;
-      }
-
-      await togglePin(topicId);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.topics.all() });
-    },
-    [isPinActionDisabled, queryClient, togglePin],
-  );
-
   const topicsValue = useMemo(
     () => ({
-      isPinActionDisabled,
       isTopicListLoading: topicList.isLoadingInitial,
-      pinnedTopicIds: topicPins.pinnedIds,
+      topicQueryError: topicList.error,
       topics: topicList.topics,
     }),
-    [isPinActionDisabled, topicList.isLoadingInitial, topicList.topics, topicPins.pinnedIds],
+    [topicList.error, topicList.isLoadingInitial, topicList.topics],
   );
   const actionsValue = useMemo(
     () => ({
@@ -170,9 +153,8 @@ export function TopicListProvider({ children, searchText = '' }: TopicListProvid
       deleteTopics,
       loadMoreTopics: topicList.loadMore,
       renameTopic,
-      toggleTopicPin,
     }),
-    [deleteTopic, deleteTopics, renameTopic, topicList.loadMore, toggleTopicPin],
+    [deleteTopic, deleteTopics, renameTopic, topicList.loadMore],
   );
 
   return (

@@ -1,13 +1,20 @@
 import { Section, Spinner } from '@cherrystudio/ui/components';
-import type { Model, UniqueModelId } from '@cherrystudio/universal/data/types/model';
-import type { Provider } from '@cherrystudio/universal/data/types/provider';
 import { LegendList, type LegendListRenderItemProps } from '@legendapp/list/react-native';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { BackHeader } from '@/frontend/components/headers';
+import { RouteHeader } from '@/frontend/components/headers';
+import {
+  filterModelsByType,
+  getModelTypeCounts,
+  ModelSearchControls,
+  ModelTypeFilterBar,
+  type ModelTypeFilter,
+} from '@/frontend/components/modelPicker';
+import type { Model, UniqueModelId } from '@/shared/data/types/model';
+import type { Provider } from '@/shared/data/types/provider';
 
 import { useProviderDetailSettings } from './detail';
 import { ProviderModelPullChrome } from './models/components/ProviderModelPullChrome/ProviderModelPullChrome';
@@ -15,8 +22,6 @@ import {
   ProviderModelRow,
   providerModelRowEstimatedHeight,
 } from './models/components/ProviderModelRow';
-import { ProviderModelSearchField } from './models/components/ProviderModelSearchField';
-import { ProviderModelTypeFilterBar } from './models/components/ProviderModelTypeFilterBar';
 import { useProviderModelPull } from './models/hooks/useProviderModelPull';
 import {
   type ProviderModelPullApplyChange,
@@ -30,11 +35,6 @@ import {
   type ProviderModelPullSectionKey,
 } from './models/utils/providerModelPullPreview';
 import { consumeProviderModelPullPreview } from './models/utils/providerModelPullPreviewStore';
-import {
-  filterModelsByProviderModelType,
-  getProviderModelTypeCounts,
-  type ProviderModelTypeFilter,
-} from './models/utils/providerModelTypeFilter';
 
 type PullTranslator = ReturnType<typeof useTranslation>['t'];
 
@@ -108,7 +108,7 @@ export default function ProviderModelPullScreen() {
 
   return (
     <>
-      <BackHeader title={t('settings.provider.models.pullPreviewTitle')} />
+      <RouteHeader title={t('settings.provider.models.pullPreviewTitle')} />
       {preview ? (
         <ProviderModelPullPreviewPage
           applyModelChange={applyModelChange}
@@ -145,7 +145,7 @@ function ProviderModelPullPreviewPage({
   const { t } = useTranslation();
   const [searchText, setSearchText] = useState('');
   const deferredSearchText = useDeferredValue(searchText);
-  const [typeFilter, setTypeFilter] = useState<ProviderModelTypeFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<ModelTypeFilter>('all');
   const missingCount = preview.missing.length;
   const searchedPreview = useMemo(
     () => filterProviderModelPullPreview(preview, deferredSearchText),
@@ -153,15 +153,15 @@ function ProviderModelPullPreviewPage({
   );
   const displayedPreview = useMemo(
     () => ({
-      added: filterModelsByProviderModelType(searchedPreview.added, typeFilter),
-      missing: filterModelsByProviderModelType(searchedPreview.missing, typeFilter),
+      added: filterModelsByType(searchedPreview.added, typeFilter),
+      missing: filterModelsByType(searchedPreview.missing, typeFilter),
     }),
     [searchedPreview, typeFilter],
   );
   // Counted over what the search left behind but before the type filter, so a
   // tab's number says how many models picking it would show.
   const typeCounts = useMemo(
-    () => getProviderModelTypeCounts([...searchedPreview.added, ...searchedPreview.missing]),
+    () => getModelTypeCounts([...searchedPreview.added, ...searchedPreview.missing]),
     [searchedPreview],
   );
   const { applySelection, isApplying, selectedIds, toggleAll, toggleModel } =
@@ -206,9 +206,6 @@ function ProviderModelPullPreviewPage({
 
   return (
     <>
-      {process.env.EXPO_OS === 'ios' ? (
-        <ProviderModelSearchField searchText={searchText} setSearchText={setSearchText} />
-      ) : null}
       <LegendList
         alwaysBounceVertical={false}
         contentContainerStyle={styles.listContent}
@@ -231,20 +228,15 @@ function ProviderModelPullPreviewPage({
           ) : null
         }
         ListHeaderComponent={
-          // One gap for the whole screen: the Android search field, the filter
-          // bar and the first section are all 12 apart. iOS pads nothing above
-          // the filter bar — its search field belongs to the navigation bar,
-          // which already leaves a gap of its own below itself.
-          <View className={process.env.EXPO_OS === 'ios' ? 'gap-3 px-4 pb-3' : 'gap-3 px-4 py-3'}>
-            {process.env.EXPO_OS === 'ios' ? null : (
-              <ProviderModelSearchField searchText={searchText} setSearchText={setSearchText} />
-            )}
-            <ProviderModelTypeFilterBar
+          // The platform controls put native iOS search in the navigation bar
+          // and Android search in the list header while keeping the filter here.
+          <ModelSearchControls searchText={searchText} setSearchText={setSearchText}>
+            <ModelTypeFilterBar
               counts={typeCounts}
               selectedFilter={typeFilter}
               onSelect={setTypeFilter}
             />
-          </View>
+          </ModelSearchControls>
         }
         maintainVisibleContentPosition={false}
         recycleItems
@@ -349,7 +341,7 @@ function PullSectionHeader({
         hitSlop={6}
         onPress={onActionPress}
       >
-        <Text className="font-medium text-primary text-sm">{actionLabel}</Text>
+        <Text className="font-medium text-foreground text-sm">{actionLabel}</Text>
       </Pressable>
     </Section.Header>
   );

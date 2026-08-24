@@ -1,4 +1,4 @@
-import { XIcon } from 'lucide-uniwind/png';
+import XIcon from '@cherrystudio/app-icons/icons/x';
 import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 
-import { FilePreview } from '@/frontend/components/FilePreview';
+import { FileEntryPreview } from '@/frontend/components/FileEntryPreview';
 
 import {
   type ComposerAttachmentDraft,
@@ -24,7 +24,7 @@ type ComposerAttachmentStripProps = {
 /**
  * The row of pending attachments. Sources show import progress until they have
  * a managed file entry; ready files then delegate all presentation and opening
- * behavior to FilePreview.
+ * behavior to FileEntryPreview.
  */
 export function ComposerAttachmentStrip({
   attachments,
@@ -65,7 +65,7 @@ function ManagedAttachmentTile({
 }) {
   return (
     <View accessibilityLabel={attachment.name}>
-      <FilePreview entryId={attachment.fileEntryId} />
+      <FileEntryPreview entryId={attachment.fileEntryId} />
       <RemoveBadge onPress={onRemove} />
     </View>
   );
@@ -109,7 +109,7 @@ function RemoveBadge({ onPress }: { onPress: () => void }) {
       onPress={handlePress}
     >
       <View className="absolute top-1.5 right-1.5 size-7 items-center justify-center rounded-full bg-constant-white">
-        <XIcon className="size-4.5 text-constant-black" strokeWidth={2.5} />
+        <XIcon className="size-4.5 text-constant-black" />
       </View>
     </Pressable>
   );

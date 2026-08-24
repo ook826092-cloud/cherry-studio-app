@@ -1,64 +1,39 @@
-import type { OrderRequest } from '@cherrystudio/universal/data/api/schemas/_endpointHelpers';
+import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
+import * as Crypto from 'expo-crypto';
+
+import { application } from '@/backend/core/application/Application';
+import { DataApiErrorFactory } from '@/shared/data/api/errors';
+import type { OrderRequest } from '@/shared/data/api/schemas/endpointHelpers';
 import type {
   ActiveNodeResponse,
   CreateTopicDto,
   DeleteTopicsResult,
   DuplicateTopicDto,
   ListTopicsQuery,
+  TopicListItem,
   UpdateTopicDto,
-} from '@cherrystudio/universal/data/api/schemas/topics';
-import {
-  type CursorPaginationResponse,
-  DataApiErrorFactory,
-} from '@cherrystudio/universal/data/api/types';
-import type { MessageStats } from '@cherrystudio/universal/data/types/message';
-import type { Topic } from '@cherrystudio/universal/data/types/topic';
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  inArray,
-  isNull,
-  notInArray,
-  or,
-  type SQL,
-  sql,
-} from 'drizzle-orm';
-import * as Crypto from 'expo-crypto';
-
-import { application } from '@/backend/core/application/Application';
+} from '@/shared/data/api/schemas/topics';
+import type { CursorPaginationResponse } from '@/shared/data/api/types';
+import type { MessageStats } from '@/shared/data/types/message';
+import type { Topic } from '@/shared/data/types/topic';
 
 import {
   assistantTable,
-  chatMessageFileRefTable,
   type MessageRow,
   messageTable,
-  pinTable,
   type TopicRow,
   topicTable,
 } from '../db/schemas';
 import { registerDataService } from './dataServiceRegistry';
 import { createRootMessageTx } from './MessageService';
-import { pinService } from './PinService';
-import { tagService } from './TagService';
+import { asStringKey, decodeListCursor, encodeCursor, keysetOrdering } from './utils/keysetCursor';
 import { applyMoves, insertWithOrderKey } from './utils/orderKey';
 import { timestampToISO } from './utils/rowMappers';
 
 const defaultLimit = 50;
 const maxLimit = 200;
-const sqliteInArrayChunk = 500;
-const sqliteInsertChunk = 100;
 
 type DbOrTx = any;
-type TopicCursor =
-  | { id: string; orderKey: string; section: 'pin' }
-  | { id: string; orderKey: string; section: 'entity' }
-  | { id: null; orderKey: null; section: 'entity' };
-
-const firstPageCursor: TopicCursor = { id: '', orderKey: '', section: 'pin' };
-
 export class TopicService {
   /**
    * Resolved per call rather than injected once, so the instance holds no
@@ -171,13 +146,7 @@ export class TopicService {
         },
       )) as TopicRow;
       const destinationRootId = await createRootMessageTx(tx, newTopic.id);
-      const { activeNodeId, sourceIdMap } = await copyPathRowsTx(
-        tx,
-        sourcePath,
-        newTopic.id,
-        destinationRootId,
-      );
-      await copyChatMessageFileRefsTx(tx, sourceIdMap);
+      const activeNodeId = await copyPathRowsTx(tx, sourcePath, newTopic.id, destinationRootId);
 
       const [updated] = await tx
         .update(topicTable)
@@ -350,89 +319,38 @@ export class TopicService {
     }
   }
 
-  async listByCursor(query: ListTopicsQuery = {}): Promise<CursorPaginationResponse<Topic>> {
+  async listByCursor(
+    query: ListTopicsQuery = {},
+  ): Promise<CursorPaginationResponse<TopicListItem>> {
     const limit = Math.min(query.limit ?? defaultLimit, maxLimit);
-    const cursor = decodeTopicCursor(query.cursor);
+    const cursor = decodeListCursor(query.cursor, asStringKey, 'topics');
     const search = buildSearchPredicate(query.q);
-    const items: Array<{ pinOrderKey?: string; topic: Topic }> = [];
-
-    if (cursor.section === 'pin') {
-      const pinAfter = cursor.orderKey
-        ? or(
-            gt(pinTable.orderKey, cursor.orderKey),
-            and(eq(pinTable.orderKey, cursor.orderKey), gt(topicTable.id, cursor.id)),
-          )
-        : undefined;
-      const rows = await this.db
-        .select({ pinOrderKey: pinTable.orderKey, topic: topicTable })
-        .from(topicTable)
-        .innerJoin(
-          pinTable,
-          and(eq(pinTable.entityType, 'topic'), eq(pinTable.entityId, topicTable.id)),
-        )
-        .where(and(isNull(topicTable.deletedAt), pinAfter, search))
-        .orderBy(asc(pinTable.orderKey), asc(topicTable.id))
-        .limit(limit + 1);
-
-      if (rows.length === 0 && cursor.orderKey !== '') {
-        return { items: [], nextCursor: encodeEntitySectionStart() };
-      }
-      for (const row of rows.slice(0, limit)) {
-        items.push({ pinOrderKey: row.pinOrderKey, topic: rowToTopic(row.topic) });
-      }
-      if (rows.length > limit) {
-        const last = items.at(-1);
-        return {
-          items: items.map((item) => item.topic),
-          nextCursor: encodePinCursor(last?.pinOrderKey ?? '', last?.topic.id ?? ''),
-        };
-      }
-      if (items.length >= limit) {
-        return {
-          items: items.map((item) => item.topic),
-          nextCursor: encodeEntitySectionStart(),
-        };
-      }
-    }
-
-    const remaining = limit - items.length;
-    const pinnedSubquery = this.db
-      .select({ id: pinTable.entityId })
-      .from(pinTable)
-      .where(eq(pinTable.entityType, 'topic'));
-    const entityAfter =
-      cursor.section === 'entity' && cursor.orderKey !== null
-        ? or(
-            gt(topicTable.orderKey, cursor.orderKey),
-            and(eq(topicTable.orderKey, cursor.orderKey), gt(topicTable.id, cursor.id)),
-          )
-        : undefined;
+    const keyset = keysetOrdering(topicTable.orderKey, topicTable.id, {
+      major: 'asc',
+      tie: 'asc',
+    });
     const rows = await this.db
-      .select()
+      .select({ latestMessageText: messageTable.searchableText, topic: topicTable })
       .from(topicTable)
-      .where(
-        and(
-          isNull(topicTable.deletedAt),
-          notInArray(topicTable.id, pinnedSubquery),
-          entityAfter,
-          search,
-        ),
+      .leftJoin(
+        messageTable,
+        and(eq(messageTable.id, topicTable.activeNodeId), isNull(messageTable.deletedAt)),
       )
-      .orderBy(asc(topicTable.orderKey), asc(topicTable.id))
-      .limit(remaining + 1);
-    for (const row of rows.slice(0, remaining)) {
-      items.push({ topic: rowToTopic(row) });
-    }
-    const last = rows[remaining - 1];
+      .where(and(isNull(topicTable.deletedAt), cursor ? keyset.where(cursor) : undefined, search))
+      .orderBy(...keyset.orderBy)
+      .limit(limit + 1);
+
+    const items = rows
+      .slice(0, limit)
+      .map((row) => rowToTopicListItem(row.topic, row.latestMessageText));
+    const last = items.at(-1);
     return {
-      items: items.map((item) => item.topic),
-      ...(rows.length > remaining && last
-        ? { nextCursor: encodeEntityCursor(last.orderKey, last.id) }
-        : {}),
+      items,
+      ...(rows.length > limit && last ? { nextCursor: encodeCursor(last.orderKey, last.id) } : {}),
     };
   }
 
-  listPage(query?: ListTopicsQuery): Promise<CursorPaginationResponse<Topic>> {
+  listPage(query?: ListTopicsQuery): Promise<CursorPaginationResponse<TopicListItem>> {
     return this.listByCursor(query);
   }
 
@@ -481,8 +399,6 @@ export class TopicService {
     }
 
     await tx.delete(messageTable).where(inArray(messageTable.topicId, deletedIds));
-    await tagService.purgeForEntitiesTx(tx, 'topic', deletedIds);
-    await pinService.purgeForEntitiesTx(tx, 'topic', deletedIds);
     await tx.delete(topicTable).where(inArray(topicTable.id, deletedIds));
     return deletedIds;
   }
@@ -502,6 +418,13 @@ export function rowToTopic(row: TopicRow): Topic {
     orderKey: row.orderKey,
     ...(row.traceId ? { traceId: row.traceId } : {}),
     updatedAt: timestampToISO(row.updatedAt),
+  };
+}
+
+function rowToTopicListItem(row: TopicRow, latestMessageText: string | null): TopicListItem {
+  return {
+    ...rowToTopic(row),
+    latestMessageText: latestMessageText ?? '',
   };
 }
 
@@ -560,7 +483,9 @@ async function copyPathRowsTx(
   rows: MessageRow[],
   topicId: string,
   destinationRootId: string,
-): Promise<{ activeNodeId: string; sourceIdMap: Map<string, string> }> {
+): Promise<string> {
+  // Source-to-copy ids, so a copied message reparents onto its copied parent
+  // rather than the source one.
   const sourceIdMap = new Map<string, string>();
   let activeNodeId = '';
   for (const source of rows) {
@@ -586,7 +511,7 @@ async function copyPathRowsTx(
     sourceIdMap.set(source.id, copy.id);
     activeNodeId = copy.id;
   }
-  return { activeNodeId, sourceIdMap };
+  return activeNodeId;
 }
 
 function copyTimingStats(stats: MessageStats | null): MessageStats | null {
@@ -602,79 +527,10 @@ function copyTimingStats(stats: MessageStats | null): MessageStats | null {
   return Object.keys(copy).length > 0 ? copy : null;
 }
 
-async function copyChatMessageFileRefsTx(
-  tx: DbOrTx,
-  sourceIdMap: ReadonlyMap<string, string>,
-): Promise<void> {
-  const sourceIds = [...sourceIdMap.keys()];
-  for (let index = 0; index < sourceIds.length; index += sqliteInArrayChunk) {
-    // react-doctor-disable-next-line async-await-in-loop -- chunks avoid SQLite's variable limit
-    const refs = await tx
-      .select()
-      .from(chatMessageFileRefTable)
-      .where(
-        inArray(
-          chatMessageFileRefTable.sourceId,
-          sourceIds.slice(index, index + sqliteInArrayChunk),
-        ),
-      );
-    const values = refs.flatMap((ref: { fileEntryId: string; role: string; sourceId: string }) => {
-      const sourceId = sourceIdMap.get(ref.sourceId);
-      return sourceId ? [{ fileEntryId: ref.fileEntryId, role: ref.role, sourceId }] : [];
-    });
-    for (let offset = 0; offset < values.length; offset += sqliteInsertChunk) {
-      // react-doctor-disable-next-line async-await-in-loop -- chunks avoid SQLite's variable limit
-      await tx
-        .insert(chatMessageFileRefTable)
-        .values(values.slice(offset, offset + sqliteInsertChunk));
-    }
-  }
-}
-
 function buildSearchPredicate(query: string | undefined): SQL | undefined {
   const trimmed = query?.trim();
   if (!trimmed) {
     return undefined;
   }
   return sql`${topicTable.name} LIKE ${`%${trimmed.replace(/[\\%_]/g, '\\$&')}%`} ESCAPE '\\'`;
-}
-
-function decodeTopicCursor(raw: string | undefined): TopicCursor {
-  if (!raw) {
-    return firstPageCursor;
-  }
-  const separator = raw.indexOf(':');
-  if (separator < 0) {
-    return firstPageCursor;
-  }
-  const section = raw.slice(0, separator);
-  const rest = raw.slice(separator + 1);
-  if (section === 'entity' && rest === '') {
-    return { id: null, orderKey: null, section: 'entity' };
-  }
-  const idSeparator = rest.indexOf(':');
-  if (idSeparator < 0) {
-    return firstPageCursor;
-  }
-  const orderKey = rest.slice(0, idSeparator);
-  const id = rest.slice(idSeparator + 1);
-  if (!orderKey || !id) {
-    return firstPageCursor;
-  }
-  if (section === 'pin' || section === 'entity') {
-    return { id, orderKey, section };
-  }
-  return firstPageCursor;
-}
-
-function encodePinCursor(orderKey: string, id: string): string {
-  return `pin:${orderKey}:${id}`;
-}
-
-function encodeEntityCursor(orderKey: string, id: string): string {
-  return `entity:${orderKey}:${id}`;
-}
-
-function encodeEntitySectionStart(): string {
-  return 'entity:';
 }

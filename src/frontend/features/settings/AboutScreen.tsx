@@ -1,21 +1,18 @@
-import { Section } from '@cherrystudio/ui/components';
+import CodeIcon from '@cherrystudio/app-icons/icons/code';
+import CopyrightIcon from '@cherrystudio/app-icons/icons/copyright';
+import GlobeIcon from '@cherrystudio/app-icons/icons/globe';
+import MailIcon from '@cherrystudio/app-icons/icons/mail';
+import RssIcon from '@cherrystudio/app-icons/icons/rss';
+import SquareArrowOutUpRightIcon from '@cherrystudio/app-icons/icons/square-arrow-out-up-right';
+import { Image, Section } from '@cherrystudio/ui/components';
 import { PROVIDER_ICONS } from '@cherrystudio/ui/icons/providers';
 import Constants from 'expo-constants';
-import {
-  CodeIcon,
-  CopyrightIcon,
-  GlobeIcon,
-  MailIcon,
-  RssIcon,
-  SquareArrowOutUpRightIcon,
-} from 'lucide-uniwind/png';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, Text, View } from 'react-native';
 import { useUniwind } from 'uniwind';
 
-import { BackHeader } from '@/frontend/components/headers';
-import { Image } from '@/frontend/components/nativePrimitives';
+import { RouteHeader } from '@/frontend/components/headers';
 import { openExternalUrl } from '@/frontend/utils/openExternalUrl';
 
 const APP_VERSION = Constants.expoConfig?.version ?? 'latest';
@@ -45,7 +42,7 @@ export default function AboutSettingsScreen() {
 
   return (
     <>
-      <BackHeader title={t('settings.about.header')} />
+      <RouteHeader title={t('settings.about.header')} />
       <ScrollView
         alwaysBounceVertical={false}
         className="flex-1"
@@ -66,8 +63,8 @@ export default function AboutSettingsScreen() {
               <Text className="text-foreground text-sm" numberOfLines={0}>
                 {t('common.cherryStudioDescription')}
               </Text>
-              <View className="self-start rounded-full bg-primary/10 px-2 py-0.5">
-                <Text className="font-medium text-primary text-sm">v{APP_VERSION}</Text>
+              <View className="self-start rounded-full bg-secondary px-2 py-0.5">
+                <Text className="font-medium text-muted-foreground text-sm">v{APP_VERSION}</Text>
               </View>
             </View>
           </View>
@@ -77,49 +74,37 @@ export default function AboutSettingsScreen() {
               label={t('settings.about.repository.title')}
               leading={<GitHubIcon className="size-5" />}
               onPress={() => openLink(ABOUT_LINKS.repository)}
-              trailing={
-                <SquareArrowOutUpRightIcon className="size-5 text-foreground" strokeWidth={2} />
-              }
+              trailing={<SquareArrowOutUpRightIcon className="size-5 text-foreground" />}
             />
             <Section.Item
               label={t('settings.about.releases.title')}
-              leading={<RssIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<RssIcon className="size-5 text-foreground" />}
               onPress={() => openLink(ABOUT_LINKS.releases)}
-              trailing={
-                <SquareArrowOutUpRightIcon className="size-5 text-foreground" strokeWidth={2} />
-              }
+              trailing={<SquareArrowOutUpRightIcon className="size-5 text-foreground" />}
             />
             <Section.Item
               label={t('settings.about.website.title')}
-              leading={<GlobeIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<GlobeIcon className="size-5 text-foreground" />}
               onPress={() => openLink(ABOUT_LINKS.website)}
-              trailing={
-                <SquareArrowOutUpRightIcon className="size-5 text-foreground" strokeWidth={2} />
-              }
+              trailing={<SquareArrowOutUpRightIcon className="size-5 text-foreground" />}
             />
             <Section.Item
               label={t('settings.about.feedback.title')}
-              leading={<CodeIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<CodeIcon className="size-5 text-foreground" />}
               onPress={() => openLink(ABOUT_LINKS.feedback)}
-              trailing={
-                <SquareArrowOutUpRightIcon className="size-5 text-foreground" strokeWidth={2} />
-              }
+              trailing={<SquareArrowOutUpRightIcon className="size-5 text-foreground" />}
             />
             <Section.Item
               label={t('settings.about.license.title')}
-              leading={<CopyrightIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<CopyrightIcon className="size-5 text-foreground" />}
               onPress={() => openLink(ABOUT_LINKS.license)}
-              trailing={
-                <SquareArrowOutUpRightIcon className="size-5 text-foreground" strokeWidth={2} />
-              }
+              trailing={<SquareArrowOutUpRightIcon className="size-5 text-foreground" />}
             />
             <Section.Item
               label={t('settings.about.contact.title')}
-              leading={<MailIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<MailIcon className="size-5 text-foreground" />}
               onPress={() => openLink(ABOUT_LINKS.contact)}
-              trailing={
-                <SquareArrowOutUpRightIcon className="size-5 text-foreground" strokeWidth={2} />
-              }
+              trailing={<SquareArrowOutUpRightIcon className="size-5 text-foreground" />}
             />
           </Section>
         </View>

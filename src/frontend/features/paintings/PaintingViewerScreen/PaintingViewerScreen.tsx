@@ -1,10 +1,12 @@
-import type { Painting } from '@cherrystudio/universal/data/types/painting';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+/* oxlint-disable react/style-prop-object -- Expo StatusBar style is a string union. */
+import { useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, View } from 'react-native';
 
 import { useThemeColor } from '@/frontend/hooks/useThemeColor';
 import { paintingViewer } from '@/frontend/utils/constants';
+import type { Painting } from '@/shared/data/types/painting';
 
 import {
   type ResolvedPaintingAttachment,
@@ -12,7 +14,7 @@ import {
   useResolvedPaintingFiles,
 } from '../hooks/usePaintings';
 import { PaintingViewerChrome } from './components/PaintingViewerChrome';
-import { ViewerImage } from './components/ViewerImage';
+import { PaintingViewerImage } from './components/PaintingViewerImage';
 import { usePaintingViewerActions } from './hooks/usePaintingViewerActions';
 
 export function PaintingViewerScreen() {
@@ -55,7 +57,7 @@ function PaintingViewerContent({
   current: ResolvedPaintingAttachment;
   painting: Painting;
 }) {
-  const router = useRouter();
+  const { t } = useTranslation();
   const actions = usePaintingViewerActions({
     currentOutput: current,
     painting,
@@ -65,7 +67,6 @@ function PaintingViewerContent({
     <>
       <PaintingViewerChrome
         aspectRatios={paintingViewer.aspectRatios}
-        onClose={router.back}
         onDelete={() => void actions.remove()}
         onDownload={() => void actions.download()}
         onEdit={actions.edit}
@@ -73,7 +74,7 @@ function PaintingViewerContent({
         onViewConversation={actions.viewConversation}
       />
       <View className="flex-1">
-        <ViewerImage uri={current.uri} />
+        <PaintingViewerImage accessibilityLabel={t('painting.output')} uri={current.uri} />
       </View>
     </>
   );

@@ -1,6 +1,15 @@
 import { inferAdapterFamily } from '@cherrystudio/provider-registry';
-import { DataApiErrorFactory } from '@cherrystudio/universal/data/api/types';
-import type { EndpointType } from '@cherrystudio/universal/data/types/model';
+import { asc, eq, inArray } from 'drizzle-orm';
+import * as Crypto from 'expo-crypto';
+
+import { application } from '@/backend/core/application/Application';
+import type {
+  InsertUserProviderRow,
+  UserProviderRow,
+} from '@/backend/data/db/schemas/userProvider';
+import { userProviderTable } from '@/backend/data/db/schemas/userProvider';
+import { DataApiErrorFactory } from '@/shared/data/api/errors';
+import type { EndpointType } from '@/shared/data/types/model';
 import type {
   ApiKeyEntry,
   AuthConfig,
@@ -10,23 +19,12 @@ import type {
   Provider,
   ProviderSettings,
   RuntimeApiFeatures,
-} from '@cherrystudio/universal/data/types/provider';
+} from '@/shared/data/types/provider';
 import {
   DEFAULT_API_FEATURES as DEFAULT_FEATURES,
   DEFAULT_PROVIDER_SETTINGS,
-} from '@cherrystudio/universal/data/types/provider';
-import { asc, eq, inArray } from 'drizzle-orm';
-import * as Crypto from 'expo-crypto';
+} from '@/shared/data/types/provider';
 
-import { application } from '@/backend/core/application/Application';
-import { userModelTable } from '@/backend/data/db/schemas/userModel';
-import type {
-  InsertUserProviderRow,
-  UserProviderRow,
-} from '@/backend/data/db/schemas/userProvider';
-import { userProviderTable } from '@/backend/data/db/schemas/userProvider';
-
-import { pinService } from './PinService';
 import { providerRegistryService } from './ProviderRegistryService';
 import { insertManyWithOrderKey, insertWithOrderKey } from './utils/orderKey';
 
@@ -539,17 +537,6 @@ export class ProviderService {
       ) {
         throw DataApiErrorFactory.invalidOperation(`Cannot delete preset provider '${providerId}'`);
       }
-
-      const models = await tx
-        .select({ id: userModelTable.id })
-        .from(userModelTable)
-        .where(eq(userModelTable.providerId, providerId));
-
-      await pinService.purgeForEntitiesTx(
-        tx,
-        'model',
-        models.map((model) => model.id),
-      );
 
       const deletedProviders = await tx
         .delete(userProviderTable)

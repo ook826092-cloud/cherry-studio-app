@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { access, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import ts from 'typescript';
@@ -18,7 +18,6 @@ const CLASSIFICATIONS = [
   'explicit-exclusion',
   'blocked',
 ] as const;
-const MCP_STORAGE_TRANSPORTS = ['inMemory', 'sse', 'stdio', 'streamableHttp'] as const;
 const ORDINARY_AGENT_SOURCES = [
   'packages/aiCore/src/core/agents/createAgent.ts',
   'src/main/ai/runtime/aiSdk/Agent.ts',
@@ -28,7 +27,7 @@ const DELEGATED_AI_RUNTIME_CLASSIFICATIONS = [
   'explicit-exclusion',
   'blocked',
 ] as const;
-const DELEGATED_OAUTH_CLASSIFICATIONS = [
+const DELEGATED_SERVICE_CLASSIFICATIONS = [
   'semantic-port',
   'mobile-extension',
   'explicit-exclusion',
@@ -56,7 +55,6 @@ export type DesktopSyncDomain = {
   blocker?: string;
   explicitExclusions?: string[];
   mobileExtensions?: MobileExtension[];
-  mobilePreferenceExtensions?: string[];
   shapeOnlyPorts?: ShapeOnlyPort[];
   sourceCommit: string | null;
   sourcePaths: string[];
@@ -304,25 +302,6 @@ function validateDomain(id: string, value: unknown): DesktopSyncDomain {
     assertRelativeRepoPath(exclusion, `${id}.explicitExclusions`);
   }
 
-  const mobilePreferenceExtensions = value.mobilePreferenceExtensions;
-  if (
-    mobilePreferenceExtensions !== undefined &&
-    (!Array.isArray(mobilePreferenceExtensions) ||
-      !mobilePreferenceExtensions.every(
-        (entry) => typeof entry === 'string' && /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(entry),
-      ))
-  ) {
-    throw new Error(
-      `[desktop-sync-audit] ${id}.mobilePreferenceExtensions must be preference keys`,
-    );
-  }
-  if (
-    mobilePreferenceExtensions !== undefined &&
-    new Set(mobilePreferenceExtensions).size !== mobilePreferenceExtensions.length
-  ) {
-    throw new Error(`[desktop-sync-audit] ${id}.mobilePreferenceExtensions must be unique`);
-  }
-
   if (status === 'aligned') {
     if (typeof sourceCommit !== 'string' || !/^[0-9a-f]{40}$/.test(sourceCommit)) {
       throw new Error(`[desktop-sync-audit] aligned domain ${id} needs a full sourceCommit`);
@@ -394,7 +373,6 @@ function validateDomain(id: string, value: unknown): DesktopSyncDomain {
     blocker: value.blocker as string | undefined,
     explicitExclusions: explicitExclusions as string[] | undefined,
     mobileExtensions: mobileExtensions as MobileExtension[] | undefined,
-    mobilePreferenceExtensions: mobilePreferenceExtensions as string[] | undefined,
     shapeOnlyPorts: shapeOnlyPorts as ShapeOnlyPort[] | undefined,
     sourceCommit: sourceCommit as string | null,
     sourcePaths: sourcePaths as string[],
@@ -637,61 +615,6 @@ export function extractObjectKeys(
   return (keys as string[]).sort();
 }
 
-export function extractSqliteTableNames(source: string, fileName = 'schema.ts'): string[] {
-  const sourceFile = sourceFileFor(source, fileName);
-  const names = new Set<string>();
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === 'sqliteTable' &&
-      node.arguments[0] &&
-      ts.isStringLiteralLike(node.arguments[0])
-    ) {
-      names.add(node.arguments[0].text);
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  return [...names].sort();
-}
-
-function routeValue(node: ts.Node): ts.Node | null {
-  if (ts.isPropertyAssignment(node)) return unwrapExpression(node.initializer);
-  if (ts.isPropertySignature(node)) return node.type ?? null;
-  return null;
-}
-
-export function extractRouteMethods(source: string, fileName = 'routes.ts'): string[] {
-  const sourceFile = sourceFileFor(source, fileName);
-  const routes = new Set<string>();
-  const visit = (node: ts.Node): void => {
-    if (ts.isPropertyAssignment(node) || ts.isPropertySignature(node)) {
-      const route = propertyNameText(node.name);
-      if (route?.startsWith('/')) {
-        const value = routeValue(node);
-        const members = value
-          ? ts.isObjectLiteralExpression(value)
-            ? value.properties
-            : ts.isTypeLiteralNode(value)
-              ? value.members
-              : []
-          : [];
-        const methods = members
-          .map((member) => propertyNameText(member.name)?.toUpperCase())
-          .filter((method): method is string =>
-            ['DELETE', 'GET', 'PATCH', 'POST', 'PUT'].includes(method ?? ''),
-          );
-        if (methods.length === 0) routes.add(`* ${route}`);
-        for (const method of methods) routes.add(`${method} ${route}`);
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  return [...routes].sort();
-}
-
 export function extractRegistryModules(
   source: string,
   variableName: string,
@@ -722,41 +645,6 @@ export function extractRegistryModules(
     .filter((modulePath): modulePath is string => Boolean(modulePath))
     .map((modulePath) => modulePath.replace(/^\.\//, '').replace(/\.(?:tsx?|jsx?)$/, ''))
     .sort();
-}
-
-export function extractVariableCallStrings(
-  source: string,
-  variableName: string,
-  callName: string,
-  fileName = 'source.ts',
-): string[] {
-  const sourceFile = sourceFileFor(source, fileName);
-  const initializer = findVariableInitializer(sourceFile, variableName);
-  if (!initializer) throw new Error(`[desktop-sync-audit] missing ${variableName} in ${fileName}`);
-  const values = new Set<string>();
-  const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node)) {
-      const expression = node.expression;
-      const name = ts.isPropertyAccessExpression(expression)
-        ? expression.name.text
-        : ts.isIdentifier(expression)
-          ? expression.text
-          : null;
-      if (name === callName) {
-        const argument = node.arguments[0];
-        if (argument && ts.isArrayLiteralExpression(argument)) {
-          for (const element of argument.elements) {
-            if (ts.isStringLiteralLike(element)) values.add(element.text);
-          }
-        } else if (argument && ts.isStringLiteralLike(argument)) {
-          values.add(argument.text);
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(initializer);
-  return [...values].sort();
 }
 
 function extractEmbeddedRasterMediaTypes(source: string, fileName: string): string[] {
@@ -964,7 +852,7 @@ async function loadDelegatedAiRuntimeClassifications(
   return classifications;
 }
 
-async function loadDelegatedOAuthClassifications(
+async function loadDelegatedServiceClassifications(
   desktopRoot: string,
   mobileRoot: string,
   delegatedManifest: string,
@@ -973,16 +861,18 @@ async function loadDelegatedOAuthClassifications(
 ): Promise<Record<Classification, string[]>> {
   const value = await readJson(path.join(mobileRoot, delegatedManifest));
   if (!isRecord(value) || value.schemaVersion !== 1 || !isRecord(value.desktop)) {
-    throw new Error('[desktop-sync-audit] invalid delegated OAuth manifest');
+    throw new Error('[desktop-sync-audit] invalid delegated service manifest');
   }
   if (!Array.isArray(value.desktop.sourcePaths) || !Array.isArray(value.desktop.files)) {
-    throw new Error('[desktop-sync-audit] invalid delegated OAuth desktop records');
+    throw new Error('[desktop-sync-audit] invalid delegated service desktop records');
   }
   const sourcePaths = value.desktop.sourcePaths.map((sourcePath, index) => {
     if (typeof sourcePath !== 'string') {
-      throw new Error(`[desktop-sync-audit] invalid delegated OAuth source path at index ${index}`);
+      throw new Error(
+        `[desktop-sync-audit] invalid delegated service source path at index ${index}`,
+      );
     }
-    assertRelativeRepoPath(sourcePath, `delegated OAuth desktop.sourcePaths[${index}]`);
+    assertRelativeRepoPath(sourcePath, `delegated service desktop.sourcePaths[${index}]`);
     return sourcePath;
   });
   const records = value.desktop.files.map((record, index) => {
@@ -990,20 +880,22 @@ async function loadDelegatedOAuthClassifications(
       !isRecord(record) ||
       typeof record.source !== 'string' ||
       typeof record.sourceSha256 !== 'string' ||
-      !DELEGATED_OAUTH_CLASSIFICATIONS.includes(
-        record.classification as (typeof DELEGATED_OAUTH_CLASSIFICATIONS)[number],
+      !DELEGATED_SERVICE_CLASSIFICATIONS.includes(
+        record.classification as (typeof DELEGATED_SERVICE_CLASSIFICATIONS)[number],
       )
     ) {
       throw new Error(
-        `[desktop-sync-audit] invalid delegated OAuth desktop record at index ${index}`,
+        `[desktop-sync-audit] invalid delegated service desktop record at index ${index}`,
       );
     }
-    assertRelativeRepoPath(record.source, `delegated OAuth desktop.files[${index}].source`);
+    assertRelativeRepoPath(record.source, `delegated service desktop.files[${index}].source`);
     if (!/^[a-f0-9]{64}$/.test(record.sourceSha256)) {
-      throw new Error(`[desktop-sync-audit] invalid delegated OAuth source hash: ${record.source}`);
+      throw new Error(
+        `[desktop-sync-audit] invalid delegated service source hash: ${record.source}`,
+      );
     }
     return {
-      classification: record.classification as (typeof DELEGATED_OAUTH_CLASSIFICATIONS)[number],
+      classification: record.classification as (typeof DELEGATED_SERVICE_CLASSIFICATIONS)[number],
       source: record.source,
       sourceSha256: record.sourceSha256,
     };
@@ -1011,16 +903,16 @@ async function loadDelegatedOAuthClassifications(
 
   const delegatedSources = records.map(({ source }) => source);
   if (new Set(delegatedSources).size !== delegatedSources.length) {
-    throw new Error('[desktop-sync-audit] delegated OAuth sources must be unique');
+    throw new Error('[desktop-sync-audit] delegated service sources must be unique');
   }
-  const currentOAuthSources = trackedFiles(desktopRoot, sourcePaths);
+  const currentDelegatedSources = trackedFiles(desktopRoot, sourcePaths);
   const delegatedSourceSet = new Set(delegatedSources);
-  const currentOAuthSourceSet = new Set(currentOAuthSources);
-  const unclassified = currentOAuthSources.filter((source) => !delegatedSourceSet.has(source));
-  const stale = delegatedSources.filter((source) => !currentOAuthSourceSet.has(source));
+  const currentDelegatedSourceSet = new Set(currentDelegatedSources);
+  const unclassified = currentDelegatedSources.filter((source) => !delegatedSourceSet.has(source));
+  const stale = delegatedSources.filter((source) => !currentDelegatedSourceSet.has(source));
   if (unclassified.length > 0 || stale.length > 0) {
     throw new Error(
-      `[desktop-sync-audit] delegated OAuth manifest does not cover its desktop source set: ${[
+      `[desktop-sync-audit] delegated service manifest does not cover its desktop source set: ${[
         ...unclassified.map((source) => `unclassified:${source}`),
         ...stale.map((source) => `stale:${source}`),
       ]
@@ -1034,7 +926,7 @@ async function loadDelegatedOAuthClassifications(
     const excluded = explicitExclusions.some((glob) => pathMatchesGlob(source, glob));
     if ((classification === 'explicit-exclusion') !== excluded) {
       throw new Error(
-        `[desktop-sync-audit] delegated OAuth exclusion disagrees with the root manifest: ${source}`,
+        `[desktop-sync-audit] delegated service exclusion disagrees with the root manifest: ${source}`,
       );
     }
   }
@@ -1055,7 +947,7 @@ async function loadDelegatedOAuthClassifications(
     .sort();
   if (sourceDrift.length > 0) {
     throw new Error(
-      `[desktop-sync-audit] delegated OAuth source hash drift: ${sourceDrift.join(', ')}`,
+      `[desktop-sync-audit] delegated service source hash drift: ${sourceDrift.join(', ')}`,
     );
   }
 
@@ -1065,185 +957,6 @@ async function loadDelegatedOAuthClassifications(
     if (serviceSourceSet.has(source)) classifications[classification].push(source);
   }
   return classifications;
-}
-
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, canonicalize(value[key])]),
-  );
-}
-
-async function latestSnapshot(root: string): Promise<string> {
-  const metaRoot = path.join(root, 'migrations/sqlite-drizzle/meta');
-  const snapshot = (await readdir(metaRoot))
-    .filter((file) => /^\d+_snapshot\.json$/.test(file))
-    .sort()
-    .at(-1);
-  if (!snapshot) throw new Error('[desktop-sync-audit] no Drizzle snapshot found');
-  return path.join(metaRoot, snapshot);
-}
-
-async function schemaAstTables(root: string, schemaPath: string): Promise<string[]> {
-  const tables = new Set<string>();
-  for (const file of trackedFiles(root, [schemaPath])) {
-    if (!/\.tsx?$/.test(file) || file.includes('/__tests__/')) continue;
-    const source = await readFile(path.join(root, file), 'utf8');
-    for (const table of extractSqliteTableNames(source, file)) tables.add(table);
-  }
-  return [...tables].sort();
-}
-
-export async function compareSchemaState(desktopRoot: string, mobileRoot: string) {
-  const [desktopSnapshotPath, mobileSnapshotPath, desktopAst, mobileAst] = await Promise.all([
-    latestSnapshot(desktopRoot),
-    latestSnapshot(mobileRoot),
-    schemaAstTables(desktopRoot, 'src/main/data/db/schemas'),
-    schemaAstTables(mobileRoot, 'src/backend/data/db/schemas'),
-  ]);
-  const [desktopSnapshot, mobileSnapshot] = await Promise.all([
-    readJson(desktopSnapshotPath),
-    readJson(mobileSnapshotPath),
-  ]);
-  if (!isRecord(desktopSnapshot) || !isRecord(desktopSnapshot.tables)) {
-    throw new Error('[desktop-sync-audit] invalid desktop Drizzle snapshot');
-  }
-  if (!isRecord(mobileSnapshot) || !isRecord(mobileSnapshot.tables)) {
-    throw new Error('[desktop-sync-audit] invalid mobile Drizzle snapshot');
-  }
-  const desktopTables = desktopSnapshot.tables;
-  const mobileTables = mobileSnapshot.tables;
-  const desktopNames = Object.keys(desktopTables).sort();
-  const mobileNames = Object.keys(mobileTables).sort();
-  const common = desktopNames.filter((name) => name in mobileTables);
-  const changed = common.filter(
-    (name) =>
-      JSON.stringify(canonicalize(desktopTables[name])) !==
-      JSON.stringify(canonicalize(mobileTables[name])),
-  );
-
-  return {
-    ast: {
-      desktop: desktopAst,
-      desktopMatchesSnapshot: JSON.stringify(desktopAst) === JSON.stringify(desktopNames),
-      mobile: mobileAst,
-      mobileMatchesSnapshot: JSON.stringify(mobileAst) === JSON.stringify(mobileNames),
-    },
-    changed,
-    desktopSnapshot: path.basename(desktopSnapshotPath),
-    desktopTables: desktopNames,
-    extraMobile: mobileNames.filter((name) => !(name in desktopTables)),
-    missing: desktopNames.filter((name) => !(name in mobileTables)),
-    mobileSnapshot: path.basename(mobileSnapshotPath),
-    mobileTables: mobileNames,
-  };
-}
-
-async function preferenceKeys(root: string, file: string): Promise<string[]> {
-  return extractObjectKeys(
-    await readFile(path.join(root, file), 'utf8'),
-    'DefaultPreferences',
-    'default',
-    file,
-  );
-}
-
-async function directTrackedTypeScriptFiles(root: string, directory: string): Promise<string[]> {
-  return trackedFiles(root, [directory]).filter(
-    (file) => path.dirname(file) === directory && file.endsWith('.ts'),
-  );
-}
-
-async function routeMethods(root: string, directory: string): Promise<string[]> {
-  const routes = new Set<string>();
-  for (const file of await directTrackedTypeScriptFiles(root, directory)) {
-    const source = await readFile(path.join(root, file), 'utf8');
-    for (const route of extractRouteMethods(source, file)) routes.add(route);
-  }
-  return [...routes].sort();
-}
-
-async function auditSharedData(desktopRoot: string, mobileRoot: string) {
-  const desktopHandlerPath = 'src/main/data/api/handlers';
-  const mobileHandlerPath = 'src/backend/data/api/handlers';
-  const desktopSchemaPath = 'src/shared/data/api/schemas';
-  const mobileSchemaPath = 'packages/universal/src/data/api/schemas';
-  const [
-    desktopPreferences,
-    mobilePreferences,
-    desktopHandlers,
-    mobileHandlers,
-    desktopRoutes,
-    mobileRoutes,
-  ] = await Promise.all([
-    preferenceKeys(desktopRoot, 'src/shared/data/preference/preferenceSchemas.ts'),
-    preferenceKeys(mobileRoot, 'packages/universal/src/data/preference/preferenceSchemas.ts'),
-    directTrackedTypeScriptFiles(desktopRoot, desktopHandlerPath),
-    directTrackedTypeScriptFiles(mobileRoot, mobileHandlerPath),
-    routeMethods(desktopRoot, desktopHandlerPath),
-    routeMethods(mobileRoot, mobileHandlerPath),
-  ]);
-  const [desktopSchemaModules, mobileSchemaModules] = await Promise.all([
-    directTrackedTypeScriptFiles(desktopRoot, desktopSchemaPath),
-    directTrackedTypeScriptFiles(mobileRoot, mobileSchemaPath),
-  ]);
-  const desktopHandlerNames = desktopHandlers.map((file) => path.basename(file));
-  const mobileHandlerNames = mobileHandlers.map((file) => path.basename(file));
-  const desktopSchemaNames = desktopSchemaModules.map((file) => path.basename(file));
-  const mobileSchemaNames = mobileSchemaModules.map((file) => path.basename(file));
-
-  return {
-    dataApi: {
-      desktopHandlerModules: desktopHandlerNames.sort(),
-      desktopRoutes,
-      desktopSchemaModules: desktopSchemaNames.filter((file) => file !== 'apiSchemas.ts').sort(),
-      missingHandlerModules: desktopHandlerNames
-        .filter((file) => !mobileHandlerNames.includes(file))
-        .sort(),
-      missingRoutes: desktopRoutes.filter((route) => !mobileRoutes.includes(route)),
-      missingSchemaModules: desktopSchemaNames
-        .filter((file) => file !== 'apiSchemas.ts' && !mobileSchemaNames.includes(file))
-        .sort(),
-      mobileHandlerModules: mobileHandlerNames.sort(),
-      mobileRoutes,
-      mobileSchemaModules: mobileSchemaNames.filter((file) => file !== 'apiSchemas.ts').sort(),
-    },
-    preferences: {
-      desktopKeys: desktopPreferences,
-      mobileKeys: mobilePreferences,
-      sourceOnly: desktopPreferences.filter((key) => !mobilePreferences.includes(key)),
-      targetOnly: mobilePreferences.filter((key) => !desktopPreferences.includes(key)),
-    },
-  };
-}
-
-export function evaluatePreferenceAlignment(
-  desktopKeys: readonly string[],
-  mobileKeys: readonly string[],
-  declaredMobileExtensions: readonly string[],
-) {
-  const sourceOnly = desktopKeys.filter((key) => !mobileKeys.includes(key));
-  const targetOnly = mobileKeys.filter((key) => !desktopKeys.includes(key));
-  const extensionSet = new Set(declaredMobileExtensions);
-  const mobileExtensions = targetOnly.filter((key) => extensionSet.has(key));
-  const unexpectedMobileKeys = targetOnly.filter((key) => !extensionSet.has(key));
-  const staleExtensionDeclarations = declaredMobileExtensions.filter(
-    (key) => !targetOnly.includes(key),
-  );
-
-  return {
-    mobileExtensions,
-    ok:
-      sourceOnly.length === 0 &&
-      unexpectedMobileKeys.length === 0 &&
-      staleExtensionDeclarations.length === 0,
-    sourceOnly,
-    staleExtensionDeclarations,
-    unexpectedMobileKeys,
-  };
 }
 
 async function providerRegistryIds(root: string): Promise<string[]> {
@@ -1356,35 +1069,6 @@ export async function auditDesignCatalog(
   };
 }
 
-async function auditMcpRetention(desktopRoot: string, mobileRoot: string) {
-  const desktopFile = 'src/shared/data/types/mcpServer.ts';
-  const mobileFile = 'packages/universal/src/data/types/mcpServer.ts';
-  const [desktopSource, mobileSource] = await Promise.all([
-    readFile(path.join(desktopRoot, desktopFile), 'utf8'),
-    readFile(path.join(mobileRoot, mobileFile), 'utf8'),
-  ]);
-  return {
-    desktopStoredTransports: extractVariableCallStrings(
-      desktopSource,
-      'McpServerTypeSchema',
-      'enum',
-      desktopFile,
-    ),
-    mobileRuntimeProjection: extractVariableCallStrings(
-      mobileSource,
-      'StreamableHttpMcpServerSchema',
-      'literal',
-      mobileFile,
-    ),
-    mobileStoredTransports: extractVariableCallStrings(
-      mobileSource,
-      'McpServerTypeSchema',
-      'enum',
-      mobileFile,
-    ),
-  };
-}
-
 function addClassification(
   classifications: Record<Classification, string[]>,
   classification: Classification,
@@ -1433,7 +1117,7 @@ async function auditDomain(
     classifications['mobile-extension'] = mobileExtensions;
   }
   if (id === 'services' && delegatedManifest) {
-    const delegated = await loadDelegatedOAuthClassifications(
+    const delegated = await loadDelegatedServiceClassifications(
       desktopRoot,
       mobileRoot,
       delegatedManifest,
@@ -1470,76 +1154,6 @@ async function auditDomain(
   if (domain.status === 'blocked') {
     issues.push('domain-blocked');
     if (domain.blocker) blockers.push(domain.blocker);
-  }
-
-  if (id === 'schema') {
-    const schema = await compareSchemaState(desktopRoot, mobileRoot);
-    details = schema;
-    addClassification(
-      classifications,
-      'blocked',
-      schema.missing.map((table) => `table:${table}`),
-    );
-    blockers.push(...schema.missing.map((table) => `Missing persisted table: ${table}`));
-    addInvariant(invariants, {
-      domain: id,
-      id: 'desktop-schema-ast-matches-snapshot',
-      message: 'Desktop sqliteTable declarations must match the latest tracked snapshot.',
-      ok: schema.ast.desktopMatchesSnapshot,
-    });
-    addInvariant(invariants, {
-      domain: id,
-      id: 'mobile-schema-ast-matches-snapshot',
-      message: 'Mobile sqliteTable declarations must match the latest tracked snapshot.',
-      ok: schema.ast.mobileMatchesSnapshot,
-    });
-    addInvariant(invariants, {
-      domain: id,
-      id: 'all-desktop-tables-retained',
-      message: 'Mobile must retain every desktop table, including Agent and Knowledge data.',
-      ok: schema.missing.length === 0,
-    });
-  }
-
-  if (id === 'shared-data') {
-    const sharedData = await auditSharedData(desktopRoot, mobileRoot);
-    const mcp = await auditMcpRetention(desktopRoot, mobileRoot);
-    const preferenceAlignment = evaluatePreferenceAlignment(
-      sharedData.preferences.desktopKeys,
-      sharedData.preferences.mobileKeys,
-      domain.mobilePreferenceExtensions ?? [],
-    );
-    details = { ...sharedData, mcp, preferenceAlignment };
-    addClassification(
-      classifications,
-      'blocked',
-      sharedData.dataApi.missingRoutes.map((route) => `route:${route}`),
-    );
-    addClassification(
-      classifications,
-      'mobile-extension',
-      preferenceAlignment.mobileExtensions.map((key) => `preference:${key}`),
-    );
-    addInvariant(invariants, {
-      domain: id,
-      id: 'preference-key-set-aligned',
-      message: 'Preference key additions and removals require an explicit value migration.',
-      ok: preferenceAlignment.ok,
-    });
-    addInvariant(invariants, {
-      domain: id,
-      id: 'mcp-storage-retains-all-transports',
-      message: 'Storage must retain stdio, SSE, Streamable HTTP, and in-memory MCP records.',
-      ok:
-        JSON.stringify(mcp.desktopStoredTransports) === JSON.stringify(MCP_STORAGE_TRANSPORTS) &&
-        JSON.stringify(mcp.mobileStoredTransports) === JSON.stringify(MCP_STORAGE_TRANSPORTS),
-    });
-    addInvariant(invariants, {
-      domain: id,
-      id: 'mcp-runtime-projects-streamable-http',
-      message: 'The mobile runtime/UI projection must expose only Streamable HTTP.',
-      ok: JSON.stringify(mcp.mobileRuntimeProjection) === JSON.stringify(['streamableHttp']),
-    });
   }
 
   if (id === 'provider-registry') {
@@ -1615,17 +1229,6 @@ async function auditDomain(
     });
   }
 
-  if (id === 'backup') {
-    addInvariant(invariants, {
-      domain: id,
-      id: 'desktop-backup-round-trip-compatible',
-      message:
-        domain.blocker ??
-        'Desktop-restorable table, relation, attachment, logo, preference, cache, and manifest fidelity is required.',
-      ok: false,
-    });
-  }
-
   if (blockers.length > 0 && !issues.includes('unresolved-blockers')) {
     issues.push('unresolved-blockers');
   }
@@ -1694,8 +1297,7 @@ export async function auditRepositories(
         desktopRoot,
         mobileRoot,
         invariants,
-        manifest.delegatedManifests?.[id] ??
-          (id === 'services' ? manifest.delegatedManifests?.['services:oauth'] : undefined),
+        manifest.delegatedManifests?.[id],
       ),
     );
   }

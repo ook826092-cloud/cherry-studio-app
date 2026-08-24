@@ -46,17 +46,17 @@ plus `allowEmptySend` and `isSendEnabled` — see `canSend` below.
   shrinks with them.
 - `ComposerMenu` — the ＋ menu. `children` are extra `Composer.Menu.Item`s
   appended below a separator.
-- `ComposerModelPill` — the model button. `children` trail the label inside the
-  pill.
+- `ComposerModelPill` — the model button. Its `icon` is a composed `ModelPickerIcon`, and
+  `children` trail the label inside the pill.
 - `ComposerProvider` / `useComposerState` / `useComposerActions` — the draft and
   its attachments.
-- `useComposerFieldDismiss` — take the keyboard down and blur, before opening
-  anything over the composer. The pill does this itself; a toolbar button the
-  caller adds has to call it.
-- `ComposerDock` / `useComposerDockLayout` — floating the composer at the bottom
+- `useComposerFieldDismiss` — take the keyboard down and blur before opening a
+  picker or settings surface that replaces the input context. The model pill
+  does this itself; caller-owned buttons decide whether their overlay should
+  dismiss or preserve the live input.
+- `Composer.Dock` / `useComposerDockLayout` from CherryUI — floating the composer at the bottom
   of a screen, and what the content above it reserves.
-- `utils/composerAttachments` and `utils/composerLayout` are deep-imported on
-  purpose (see `index.ts`).
+- `utils/composerAttachments` is deep-imported on purpose (see `index.ts`).
 
 ## What is deliberately *not* pluggable
 
@@ -64,8 +64,9 @@ Sending. Trim, clear before awaiting, restore the draft *and* the attachments if
 it rejects, toast, log, and the un-animated keyboard dismissal — that is a
 protocol, not a part, and two screens assembling it separately would be two
 implementations of it. It lives in `ComposerSurface`, which is what renders the
-surface, so there is no way to compose a composer that skips it. Pasting is
-baked into `ComposerField` for the same reason.
+surface, so there is no way to compose a composer that skips it. A synchronous
+in-flight lock also prevents a repeated gesture from snapshotting and restoring
+the same draft twice. Pasting is baked into `ComposerField` for the same reason.
 
 The full checklist for it is the behaviour contract in
 `src/frontend/features/chat/input/README.md` — that is the screen you actually
@@ -80,23 +81,27 @@ walk to verify it.
   to the system pickers (`expo-image-picker`, `expo-document-picker`) rather
   than drawing anything in-app.
 - `components/ComposerAttachmentStrip.tsx`: internal to `ComposerAttachments`;
-  shows import progress, then delegates ready files to `FilePreview`.
+  shows import progress, then delegates ready files to `FileEntryPreview`.
 - `components/ManagedComposerProvider.tsx` and
   `hooks/useManagedComposerAttachments.ts`: import transient picker results into
   managed file entries before exposing them to Chat or Painting.
-- `components/ComposerDock.tsx` + `hooks/useComposerDockLayout.ts`: the docking
-  geometry, split because one half is per-frame and the other is not.
 - `context/ComposerProvider.tsx`: draft, attachments, field ref — split into
   three contexts so dispatch-only components skip keystroke re-renders.
 - `utils/composerAttachments.ts`: attachment drafts and the message parts they
   turn into, with tests.
-- `utils/composerLayout.ts`: the shared geometry constants.
 
 ## Behavior notes
 
-- The ＋ menu takes the keyboard down but leaves the field first responder, so
-  iOS restores the keyboard the instant the menu closes. Everything else that
-  opens over the input blurs it first, via `useComposerFieldDismiss`.
+- Opening the ＋ menu leaves the keyboard and field focus unchanged so its
+  portalled panel stays anchored to the trigger. Camera, photo, and file rows
+  close the menu, await `useComposerFieldDismiss()`, and only then open their
+  system picker. Success and cancellation both return with the keyboard closed;
+  caller-owned tool rows do not dismiss or blur. The chat effort slider also
+  keeps focus and covers the live keyboard.
+- Transient attachments render their own progress tile while they are imported
+  into managed storage. Any importing attachment disables send; text editing,
+  removal, and tools remain available. Import timing logs contain only kind,
+  size, result, and duration.
 - The i18n keys are still under `chat.*`. Two of them (`chat.media.camera`,
   `chat.media.photos`) are shared with the settings screens, so a `composer.*`
   namespace would fork strings rather than move them.

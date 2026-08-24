@@ -1,6 +1,6 @@
-import { BottomSheet, Button } from '@cherrystudio/ui/components';
+import ChevronRightIcon from '@cherrystudio/app-icons/icons/chevron-right';
+import { BottomSheet } from '@cherrystudio/ui/components';
 import type { Meta, StoryObj } from '@storybook/react-native';
-import { ChevronRightIcon } from 'lucide-uniwind/png';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { fn } from 'storybook/test';
@@ -26,19 +26,28 @@ function BottomSheetPreview() {
 
   return (
     <View className="flex-1 items-center justify-center bg-background p-6">
-      <Button onPress={() => setIsOpen(true)}>Open settings</Button>
-      <BottomSheet
-        backAccessibilityLabel="Back"
-        closeAccessibilityLabel="Close"
-        height={520}
-        isOpen={isOpen}
-        onBack={stack.length > 1 ? pop : undefined}
-        onClose={close}
-        title={pageTitles[pageKey]}
-      >
-        <BottomSheet.PageTransition depth={stack.length - 1} pageKey={pageKey}>
-          <SheetPage pageKey={pageKey} push={push} />
-        </BottomSheet.PageTransition>
+      <BottomSheet onOpenChange={setIsOpen} open={isOpen}>
+        <BottomSheet.Trigger accessibilityRole="button" className="rounded-lg bg-primary px-4 py-3">
+          <Text className="font-medium text-primary-foreground">Open settings</Text>
+        </BottomSheet.Trigger>
+        <BottomSheet.Content height={520} onClose={close}>
+          <BottomSheet.Header>
+            {stack.length > 1 ? (
+              <BottomSheet.BackButton accessibilityLabel="Back" onPress={pop} />
+            ) : (
+              <BottomSheet.CloseButton accessibilityLabel="Close" />
+            )}
+            <BottomSheet.Title>{pageTitles[pageKey]}</BottomSheet.Title>
+            {stack.length > 1 ? (
+              <BottomSheet.CloseButton accessibilityLabel="Close" />
+            ) : (
+              <BottomSheet.HeaderSpacer />
+            )}
+          </BottomSheet.Header>
+          <BottomSheet.PageTransition depth={stack.length - 1} pageKey={pageKey}>
+            <SheetPage pageKey={pageKey} push={push} />
+          </BottomSheet.PageTransition>
+        </BottomSheet.Content>
       </BottomSheet>
     </View>
   );
@@ -78,7 +87,7 @@ function SheetRow({ label, onPress }: { label: string; onPress: () => void }) {
       onPress={onPress}
     >
       <Text className="min-w-0 flex-1 text-base text-foreground">{label}</Text>
-      <ChevronRightIcon className="size-5 text-muted-foreground" strokeWidth={2} />
+      <ChevronRightIcon className="size-5 text-muted-foreground" />
     </Pressable>
   );
 }
@@ -88,7 +97,7 @@ const meta = {
   component: BottomSheet,
   args: {
     children: null,
-    onClose: fn(),
+    onOpenChange: fn(),
   },
 } satisfies Meta<typeof BottomSheet>;
 

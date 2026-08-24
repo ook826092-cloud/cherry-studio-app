@@ -4,50 +4,41 @@ import {
   countPendingToolApprovals,
   finalizeDanglingToolApprovals,
 } from '@cherrystudio/universal/ai/transport/toolApprovals';
-import type {
-  ActiveNodeStrategy,
-  ClearTopicMessagesResponse,
-  CreateMessageDto,
-  DeleteMessageResponse,
-  UpdateMessageDto,
-} from '@cherrystudio/universal/data/api/schemas/messages';
-import { DataApiErrorFactory } from '@cherrystudio/universal/data/api/types';
-import type {
-  BranchMessage,
-  BranchMessagesResponse,
-  CherryMessagePart,
-  Message,
-  MessageData,
-  MessageRuntimeStatsInput,
-  MessageStats,
-  SiblingsGroup,
-  TreeNode,
-  TreeResponse,
-} from '@cherrystudio/universal/data/types/message';
-import type { UniqueModelId } from '@cherrystudio/universal/data/types/model';
-import { readCherryMeta } from '@cherrystudio/universal/data/types/uiParts';
 import { isToolUIPart } from 'ai';
 import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
 import { application } from '@/backend/core/application/Application';
 import { loggerService } from '@/shared/core/logger/LoggerService';
+import { DataApiErrorFactory } from '@/shared/data/api/errors';
+import type {
+  ActiveNodeStrategy,
+  ClearTopicMessagesResponse,
+  BranchMessage,
+  BranchMessagesResponse,
+  CreateMessageDto,
+  DeleteMessageResponse,
+  SiblingsGroup,
+  TreeNode,
+  TreeResponse,
+  UpdateMessageDto,
+} from '@/shared/data/api/schemas/messages';
+import type {
+  CherryMessagePart,
+  Message,
+  MessageData,
+  MessageRuntimeStatsInput,
+  MessageStats,
+} from '@/shared/data/types/message';
+import type { UniqueModelId } from '@/shared/data/types/model';
 
-import type { Database } from '../db/DbService';
-import {
-  chatMessageFileRefTable,
-  fileEntryTable,
-  type MessageRow,
-  messageTable,
-  topicTable,
-} from '../db/schemas';
+import { type MessageRow, messageTable, topicTable } from '../db/schemas';
+import { createOrderedUuid } from '../db/schemas/_columnHelpers';
 import { getDataService } from './dataServiceRegistry';
 import { mergeMessageRuntimeStats } from './utils/messageStats';
 import { timestampToISO } from './utils/rowMappers';
 
 const previewLength = 50;
 const defaultLimit = 20;
-const sqliteInArrayChunk = 500;
-const sqliteInsertChunk = 100;
 const logger = loggerService.withContext('MessageService');
 
 export type BranchMessagesParams = {
@@ -68,7 +59,14 @@ export interface CreateUserMessageWithPlaceholdersInput {
   placeholders: AssistantPlaceholder[];
   siblingsGroupId?: number;
   topicId: string;
-  userMessage: { dto: CreateMessageDto; mode: 'create' } | { id: string; mode: 'existing' };
+  /**
+   * `id` sits beside `dto`, not inside it: `CreateMessageDto` is the HTTP
+   * boundary's strict object, and an id is not something a remote caller gets
+   * to choose. In-process callers do — see `newMessageId`.
+   */
+  userMessage:
+    | { dto: CreateMessageDto; id?: string; mode: 'create' }
+    | { id: string; mode: 'existing' };
 }
 
 export interface CreateUserMessageWithPlaceholdersResult {
@@ -79,76 +77,6 @@ export interface CreateUserMessageWithPlaceholdersResult {
 export type ReserveAssistantTurnPlaceholder = AssistantPlaceholder;
 export type ReserveAssistantTurnInput = CreateUserMessageWithPlaceholdersInput;
 export type ReserveAssistantTurnResult = CreateUserMessageWithPlaceholdersResult;
-
-function extractChatMessageFileEntryIds(data: MessageData | null | undefined): string[] {
-  const ids: string[] = [];
-  const seen = new Set<string>();
-
-  for (const part of data?.parts ?? []) {
-    if (part.type !== 'file') {
-      continue;
-    }
-
-    const fileEntryId = readCherryMeta(part)?.fileEntryId;
-    if (!fileEntryId || seen.has(fileEntryId)) {
-      continue;
-    }
-
-    seen.add(fileEntryId);
-    ids.push(fileEntryId);
-  }
-
-  return ids;
-}
-
-async function selectExistingFileEntryIdsTx(
-  tx: Database,
-  ids: readonly string[],
-): Promise<Set<string>> {
-  const existing = new Set<string>();
-
-  for (let index = 0; index < ids.length; index += sqliteInArrayChunk) {
-    const rows = await tx
-      .select({ id: fileEntryTable.id })
-      .from(fileEntryTable)
-      .where(inArray(fileEntryTable.id, ids.slice(index, index + sqliteInArrayChunk)));
-    for (const row of rows) {
-      existing.add(row.id);
-    }
-  }
-
-  return existing;
-}
-
-async function replaceChatMessageFileRefsTx(
-  tx: Database,
-  messageId: string,
-  data: MessageData,
-): Promise<void> {
-  await tx.delete(chatMessageFileRefTable).where(eq(chatMessageFileRefTable.sourceId, messageId));
-
-  const fileEntryIds = extractChatMessageFileEntryIds(data);
-  if (fileEntryIds.length === 0) {
-    return;
-  }
-
-  const existingIds = await selectExistingFileEntryIdsTx(tx, fileEntryIds);
-  const rows = fileEntryIds
-    .filter((fileEntryId) => existingIds.has(fileEntryId))
-    .map((fileEntryId) => ({ fileEntryId, role: 'attachment' as const, sourceId: messageId }));
-
-  if (rows.length !== fileEntryIds.length) {
-    logger.warn('Dropped chat message file refs without matching file_entry', {
-      dropped: fileEntryIds.length - rows.length,
-      messageId,
-      total: fileEntryIds.length,
-    });
-  }
-
-  for (let index = 0; index < rows.length; index += sqliteInsertChunk) {
-    await tx.insert(chatMessageFileRefTable).values(rows.slice(index, index + sqliteInsertChunk));
-  }
-}
 
 export class MessageService {
   /**
@@ -517,7 +445,6 @@ export class MessageService {
         })
         .returning();
 
-      await replaceChatMessageFileRefsTx(tx, row.id, data);
       await this.topicService.setActiveNodeTx(tx, source.topicId, row.id, { assumeValid: true });
       return rowToMessage(row);
     });
@@ -550,13 +477,22 @@ export class MessageService {
         })
         .returning();
 
-      await replaceChatMessageFileRefsTx(tx, row.id, dto.data);
       if (dto.setAsActive !== false) {
         await this.topicService.setActiveNodeTx(tx, topicId, row.id, { assumeValid: true });
       }
 
       return rowToMessage(row);
     });
+  }
+
+  /**
+   * Allocate a message id before the row exists, so a caller can show the
+   * message it is about to write and have the persisted row arrive under the
+   * same identity. Same generator as the column default, so the ids stay
+   * time-ordered.
+   */
+  newMessageId(): string {
+    return createOrderedUuid();
   }
 
   async createUserMessageWithPlaceholders(
@@ -575,7 +511,7 @@ export class MessageService {
 
       let userMessage: Message;
       if (input.userMessage.mode === 'create') {
-        const dto = input.userMessage.dto;
+        const { dto, id } = input.userMessage;
         const resolvedParentId =
           dto.parentId === undefined || dto.parentId === null
             ? await getRootMessageIdTx(tx, input.topicId)
@@ -583,6 +519,7 @@ export class MessageService {
         const [row] = await tx
           .insert(messageTable)
           .values({
+            ...(id ? { id } : {}),
             data: dto.data,
             modelId: dto.modelId ?? null,
             messageSnapshot: dto.messageSnapshot ?? null,
@@ -593,7 +530,6 @@ export class MessageService {
             topicId: input.topicId,
           })
           .returning();
-        await replaceChatMessageFileRefsTx(tx, row.id, dto.data);
         userMessage = rowToMessage(row);
       } else {
         const [row] = await tx
@@ -639,7 +575,6 @@ export class MessageService {
             topicId: input.topicId,
           })
           .returning();
-        await replaceChatMessageFileRefsTx(tx, row.id, placeholder.data);
         placeholders.push(rowToMessage(row));
       }
 
@@ -708,7 +643,6 @@ export class MessageService {
       }
 
       if (dto.data !== undefined) {
-        await replaceChatMessageFileRefsTx(tx, id, dto.data);
       }
 
       return rowToMessage(row);
@@ -759,7 +693,6 @@ export class MessageService {
         throw DataApiErrorFactory.notFound('Message', id);
       }
 
-      await replaceChatMessageFileRefsTx(tx, id, input.data);
       return rowToMessage(row);
     });
   }

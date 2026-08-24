@@ -1,8 +1,6 @@
-import type {
-  WebSearchExecutionConfig,
-  WebSearchResult,
-} from '@cherrystudio/universal/data/types/webSearch';
 import { sliceByTokens } from 'tokenx';
+
+import type { WebSearchExecutionConfig, WebSearchResult } from '@/shared/data/types/webSearch';
 
 import { postProcessWebSearchResponse } from '../postProcessing';
 
@@ -14,7 +12,6 @@ describe('web search post processing', () => {
     ];
     const config: WebSearchExecutionConfig = {
       compression: { cutoffLimit: 8, method: 'cutoff' },
-      excludeDomains: [],
       maxResults: 5,
     };
 

@@ -1,5 +1,6 @@
-import type { CursorPaginationResponse } from '@cherrystudio/universal/data/api/types';
 import { type InfiniteData, QueryClient } from '@tanstack/react-query';
+
+import type { CursorPaginationResponse } from '@/shared/data/api/types';
 
 import {
   dataApiCollectionFilters,
@@ -64,7 +65,7 @@ describe('optimistic query updates', () => {
       items: [item('a'), item('b')],
       total: 2,
     });
-    queryClient.setQueryData(['/mcp-servers', { isActive: true }], {
+    queryClient.setQueryData(['/mcp-servers', { isEnabled: true }], {
       items: [item('a')],
       total: 1,
     });
@@ -80,7 +81,7 @@ describe('optimistic query updates', () => {
       items: [item('b')],
       total: 1,
     });
-    expect(queryClient.getQueryData(['/mcp-servers', { isActive: true }])).toEqual({
+    expect(queryClient.getQueryData(['/mcp-servers', { isEnabled: true }])).toEqual({
       items: [],
       total: 0,
     });

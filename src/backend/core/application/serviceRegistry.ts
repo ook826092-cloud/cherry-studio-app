@@ -1,12 +1,17 @@
+import { InMemoryAgentSessionStore } from '@/backend/ai/agentHost/InMemoryAgentSessionStore';
+import { MobileAgentHost } from '@/backend/ai/agentHost/MobileAgentHost';
 import { AiService } from '@/backend/ai/AiService';
 import { McpRuntimeService } from '@/backend/ai/mcp';
 import { ChatRuntime } from '@/backend/ai/streamManager/ChatRuntime';
 import { CacheService } from '@/backend/data/CacheService';
 import { DbService } from '@/backend/data/db/DbService';
 import { PreferenceService } from '@/backend/data/PreferenceService';
+import { BackgroundActivityEnvironment } from '@/backend/services/backgroundActivity/BackgroundActivityEnvironment';
+import { BackgroundActivityManager } from '@/backend/services/backgroundActivity/BackgroundActivityManager';
+import { BackgroundReplyRuntime } from '@/backend/services/backgroundReply';
+import { JobHandlerRegistry } from '@/backend/services/jobs/JobHandlerRegistry';
 import { JobRuntime } from '@/backend/services/jobs/JobRuntime';
-import { ProviderOAuthService } from '@/backend/services/oauth/authorization/ProviderOAuthService';
-import { OAuthRuntimeService } from '@/backend/services/oauth/runtime/OAuthRuntimeService';
+import { KeepAliveCoordinator } from '@/backend/services/keepAlive/KeepAliveCoordinator';
 import { WebSearchService } from '@/backend/services/webSearch/WebSearchService';
 
 import type { ServiceConstructor } from '../lifecycle/types';
@@ -32,12 +37,18 @@ export const services = {
   CacheService,
   DbService,
   PreferenceService,
+  BackgroundActivityEnvironment,
+  KeepAliveCoordinator,
+  BackgroundActivityManager,
+  BackgroundReplyRuntime,
   WebSearchService,
   McpRuntimeService,
-  OAuthRuntimeService,
-  ProviderOAuthService,
   AiService,
   ChatRuntime,
+  // Architecture-slice adapter; durable Mobile Agent persistence is tracked by #568.
+  AgentSessionStore: InMemoryAgentSessionStore,
+  MobileAgentHost,
+  JobHandlerRegistry,
   JobRuntime,
 } as const;
 

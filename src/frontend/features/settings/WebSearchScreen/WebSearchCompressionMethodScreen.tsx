@@ -1,11 +1,8 @@
 import { Section } from '@cherrystudio/ui/components';
 import { useRouter } from 'expo-router';
-import { CheckIcon } from 'lucide-uniwind/png';
 import { useTranslation } from 'react-i18next';
-import { ScrollView } from 'react-native';
 
-import { BackHeader } from '@/frontend/components/headers';
-
+import { SettingsScrollPage } from '../components/SettingsScrollPage';
 import { useWebSearchProviderPreferences } from '../hooks/useWebSearchProviderPreferences';
 
 export default function WebSearchCompressionMethodScreen() {
@@ -14,40 +11,26 @@ export default function WebSearchCompressionMethodScreen() {
   const { compressionMethod } = useWebSearchProviderPreferences();
 
   return (
-    <>
-      <BackHeader title={t('settings.websearch.compressionMethod')} />
-      <ScrollView
-        alwaysBounceVertical={false}
-        className="flex-1"
-        contentContainerClassName="px-4 py-5"
-        contentInsetAdjustmentBehavior="automatic"
-        showsVerticalScrollIndicator={false}
-      >
-        <Section>
-          {compressionMethod.options.map((option) => {
-            const selected = option.value === compressionMethod.value;
+    <SettingsScrollPage headerProps={{ title: t('settings.websearch.compressionMethod') }}>
+      <Section>
+        {compressionMethod.options.map((option) => {
+          const selected = option.value === compressionMethod.value;
 
-            return (
-              <Section.Item
-                accessibilityRole="radio"
-                accessibilityState={{ checked: selected }}
-                key={option.value}
-                label={option.label}
-                onPress={() => {
-                  if (!selected) {
-                    compressionMethod.onValueChange(option.value);
-                    router.back();
-                  }
-                }}
-                showChevron={false}
-                trailing={
-                  selected ? <CheckIcon className="size-5 text-primary" strokeWidth={2.5} /> : null
+          return (
+            <Section.RadioItem
+              key={option.value}
+              label={option.label}
+              onPress={() => {
+                if (!selected) {
+                  compressionMethod.onValueChange(option.value);
+                  router.back();
                 }
-              />
-            );
-          })}
-        </Section>
-      </ScrollView>
-    </>
+              }}
+              selected={selected}
+            />
+          );
+        })}
+      </Section>
+    </SettingsScrollPage>
   );
 }

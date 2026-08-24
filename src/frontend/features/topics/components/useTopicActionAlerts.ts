@@ -1,8 +1,8 @@
-import type { Topic } from '@cherrystudio/universal/data/types/topic';
+import { useAlert } from '@cherrystudio/ui/components';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
+import type { Topic } from '@/shared/data/types/topic';
 
 import { useTopicListActions } from '../context/TopicListProvider';
 

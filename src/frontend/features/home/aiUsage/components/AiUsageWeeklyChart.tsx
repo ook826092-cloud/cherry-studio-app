@@ -1,4 +1,5 @@
-import { CircleArrowDownIcon, CircleArrowUpIcon } from 'lucide-uniwind/png';
+import CircleArrowDownIcon from '@cherrystudio/app-icons/icons/circle-arrow-down';
+import CircleArrowUpIcon from '@cherrystudio/app-icons/icons/circle-arrow-up';
 import { type ReactNode, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -55,8 +56,7 @@ export function AiUsageWeeklyChart({
 }: AiUsageWeeklyChartProps) {
   const { t } = useTranslation();
   const { onLayout, ref: containerRef, width: containerWidth } = useMeasuredWidth();
-  const [primary, info, warning, muted, separator, success, foreground] = useThemeColor([
-    'primary',
+  const [info, warning, muted, separator, success, foreground] = useThemeColor([
     'info',
     'warning',
     'muted-foreground',
@@ -121,14 +121,14 @@ export function AiUsageWeeklyChart({
     }
 
     return data.series.map((series, index) => ({
-      color: getSeriesColor(series.isOther, index, primary, info, warning, muted),
+      color: getSeriesColor(series.isOther, index, success, info, warning, muted),
       key: series.key,
       label: series.isOther
         ? t('aiUsage.other')
         : displayAiUsageModelId(series.modelId) || t('aiUsage.unknownModel'),
       yKey: seriesValueKey(index),
     }));
-  }, [data.series, info, muted, primary, t, warning]);
+  }, [data.series, info, muted, success, t, warning]);
   const chartTheme = useMemo<CartesianChartTheme>(
     () => ({
       axis: 'transparent',
@@ -136,10 +136,10 @@ export function AiUsageWeeklyChart({
       grid: 'transparent',
       mutedText: muted,
       plotBackground: 'transparent',
-      series: chartSeries.map((series) => series.color ?? primary),
+      series: chartSeries.map((series) => series.color ?? success),
       text: foreground,
     }),
-    [chartSeries, foreground, muted, primary],
+    [chartSeries, foreground, muted, success],
   );
   const renderBar = useCallback(
     ({ bar, fill, radius }: BarChartRenderBarProps<ChartDatum>) => {
@@ -312,7 +312,7 @@ export function AiUsageWeeklyChart({
                         <Text
                           className={
                             isSelected
-                              ? 'font-semibold text-primary text-xs'
+                              ? 'font-semibold text-foreground text-xs'
                               : 'text-muted-foreground text-xs'
                           }
                           maxFontSizeMultiplier={1.1}
@@ -391,7 +391,7 @@ function AiUsageWeekOverWeekBadge({ change, locale }: { change: number; locale: 
       className="shrink-0 flex-row items-center gap-1"
       testID={change > 0 ? 'ai-usage-week-over-week-up' : 'ai-usage-week-over-week-down'}
     >
-      <TrendIcon className="size-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+      <TrendIcon className="size-4 shrink-0 text-muted-foreground" />
       <Text className="text-muted-foreground text-sm" maxFontSizeMultiplier={1.1} numberOfLines={1}>
         {t('aiUsage.weekOverWeek')}
       </Text>
@@ -437,13 +437,13 @@ function WeeklyChartSkeleton() {
 function getSeriesColor(
   isOther: boolean,
   index: number,
-  primary: string,
+  success: string,
   info: string,
   warning: string,
   muted: string,
 ): string {
   if (isOther) return muted;
-  if (index === 0) return primary;
+  if (index === 0) return success;
   if (index === 1) return info;
   if (index === 2) return warning;
   return muted;

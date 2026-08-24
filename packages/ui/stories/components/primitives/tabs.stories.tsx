@@ -1,6 +1,7 @@
+import MessageCircleIcon from '@cherrystudio/app-icons/icons/message-circle';
+import SettingsIcon from '@cherrystudio/app-icons/icons/settings';
 import { Tabs, type TabsItemState, type TabsProps } from '@cherrystudio/ui/components';
 import type { Meta, StoryObj } from '@storybook/react-native';
-import { MessageCircleIcon, SettingsIcon } from 'lucide-uniwind/png';
 import { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { fn } from 'storybook/test';
@@ -18,7 +19,6 @@ const customItems = [
       <View className="flex-row items-center gap-1.5">
         <MessageCircleIcon
           className={isSelected ? 'size-4 text-foreground' : 'size-4 text-muted-foreground'}
-          strokeWidth={2}
         />
         <Text className={isSelected ? 'font-medium text-foreground' : 'text-muted-foreground'}>
           Messages
@@ -34,7 +34,6 @@ const customItems = [
       <View className="flex-row items-center gap-1.5">
         <SettingsIcon
           className={isSelected ? 'size-4 text-foreground' : 'size-4 text-muted-foreground'}
-          strokeWidth={2}
         />
         <Text className={isSelected ? 'font-medium text-foreground' : 'text-muted-foreground'}>
           Settings

@@ -2,23 +2,33 @@ import '../frontend/styles/global.css';
 import '@/bootstrap/preboot/abortSignal';
 import '@/bootstrap/preboot/blob';
 import '@/bootstrap/preboot/webCrypto';
+import { Alert, Toast } from '@cherrystudio/ui/components';
 import { BottomSheetProvider } from '@swmansion/react-native-bottom-sheet';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { HeroUINativeProvider } from 'heroui-native/provider';
+import type { PropsWithChildren } from 'react';
+import { useTranslation } from 'react-i18next';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { withUniwind } from 'uniwind';
 
-import { AppBootstrapGate, AppBootstrapProvider } from '@/bootstrap';
-import { AlertProvider } from '@/frontend/components/AlertProvider';
-import { NavigationThemeProvider } from '@/frontend/components/navigation';
+import { AppBootstrapGate, AppBootstrapProvider, useAppBootstrapState } from '@/bootstrap';
+import { reportStartupCoverPresented } from '@/bootstrap/runtime/startupCoverHandoff';
+import { headerScreenOptions, RouteHeaderProvider } from '@/frontend/components/headers';
+import {
+  getRootHeaderStyle,
+  getTransparentHeaderStyle,
+  NavigationThemeProvider,
+  paintingViewerHeaderShown,
+} from '@/frontend/components/navigation';
+import { StartupCoordinator, StartupRouteReadyReporter } from '@/frontend/components/startup';
 import { QueryProvider } from '@/frontend/data';
 import { useThemeColor } from '@/frontend/hooks/useThemeColor';
-import { isIOS, isLiquidGlassAvailable } from '@/frontend/utils/constants';
+import { isLiquidGlassAvailable } from '@/frontend/utils/constants';
 
-// Hold the native splash across app bootstrap so the gate never exposes a
-// blank frame. `AppBootstrapProvider` hides it once initialization settles.
+// Hold the native surface until the matching React Native startup cover has
+// committed its first layout.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const RootGestureView = withUniwind(GestureHandlerRootView);
@@ -27,23 +37,54 @@ export default function RootLayout() {
   return (
     <RootGestureView className="flex-1">
       <KeyboardProvider>
-        <HeroUINativeProvider config={{ devInfo: { stylingPrinciples: false } }}>
-          <QueryProvider>
-            <AppBootstrapProvider>
-              <AppBootstrapGate>
-                <NavigationThemeProvider>
-                  <AlertProvider>
-                    <BottomSheetProvider>
-                      <RootStack />
-                    </BottomSheetProvider>
-                  </AlertProvider>
-                </NavigationThemeProvider>
-              </AppBootstrapGate>
-            </AppBootstrapProvider>
-          </QueryProvider>
+        <HeroUINativeProvider config={{ devInfo: { stylingPrinciples: false }, toast: 'disabled' }}>
+          <Toast.Provider>
+            <QueryProvider>
+              <AppBootstrapProvider>
+                <BootstrapStartupCoordinator>
+                  <AppBootstrapGate>
+                    <StartupRouteReadyReporter>
+                      <NavigationThemeProvider>
+                        <AppAlertProvider>
+                          <BottomSheetProvider>
+                            <RouteHeaderProvider rootAction="back">
+                              <RootStack />
+                            </RouteHeaderProvider>
+                          </BottomSheetProvider>
+                        </AppAlertProvider>
+                      </NavigationThemeProvider>
+                    </StartupRouteReadyReporter>
+                  </AppBootstrapGate>
+                </BootstrapStartupCoordinator>
+              </AppBootstrapProvider>
+            </QueryProvider>
+          </Toast.Provider>
         </HeroUINativeProvider>
       </KeyboardProvider>
     </RootGestureView>
+  );
+}
+
+function AppAlertProvider({ children }: PropsWithChildren) {
+  const { t } = useTranslation();
+
+  return (
+    <Alert.Provider labels={{ cancel: t('common.cancel'), ok: t('common.ok') }}>
+      {children}
+    </Alert.Provider>
+  );
+}
+
+function BootstrapStartupCoordinator({ children }: PropsWithChildren) {
+  const bootstrapState = useAppBootstrapState();
+
+  return (
+    <StartupCoordinator
+      bootstrapReady={bootstrapState.status !== 'loading'}
+      onCoverPresented={reportStartupCoverPresented}
+    >
+      {children}
+    </StartupCoordinator>
   );
 }
 
@@ -58,37 +99,23 @@ function RootStack() {
   return (
     <Stack
       screenOptions={{
-        headerShadowVisible: false,
-        headerStyle: isIOS ? undefined : { backgroundColor },
+        ...headerScreenOptions,
+        headerStyle: getRootHeaderStyle(backgroundColor),
         headerTransparent: isLiquidGlassAvailable,
         headerTintColor: foregroundColor,
       }}
     >
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-      <Stack.Screen
-        name="oauth/authorize"
-        options={{
-          headerStyle: { backgroundColor },
-          headerTransparent: false,
-          presentation: 'modal',
-        }}
-      />
-      <Stack.Screen
-        name="topics"
-        options={{
-          contentStyle: { backgroundColor: 'transparent' },
-          headerBackButtonDisplayMode: 'minimal',
-          headerStyle: isIOS ? undefined : { backgroundColor: 'transparent' },
-          headerTransparent: isLiquidGlassAvailable,
-        }}
-      />
+      <Stack.Screen name="topics" />
+      {/* Settings owns a nested stack and draws its headers there, so the root
+          stack only needs to push the page without adding another header. */}
+      <Stack.Screen name="settings" options={{ headerShown: false }} />
       <Stack.Screen
         name="paintings/index"
         options={{
           contentStyle: { backgroundColor: 'transparent' },
-          headerBackButtonDisplayMode: 'minimal',
-          headerStyle: isIOS ? undefined : { backgroundColor: 'transparent' },
+          headerStyle: getTransparentHeaderStyle(),
           headerTransparent: isLiquidGlassAvailable,
         }}
       />
@@ -99,6 +126,7 @@ function RootStack() {
           // photo rather than on a themed surface: black behind, white on top,
           // in both themes. `PaintingViewerChrome` paints the same pair.
           contentStyle: { backgroundColor: constantBlack },
+          headerShown: paintingViewerHeaderShown,
           headerTintColor: constantWhite,
           headerTransparent: true,
           title: '',
@@ -108,8 +136,7 @@ function RootStack() {
         name="paintings/[paintingId]/conversation"
         options={{
           contentStyle: { backgroundColor: 'transparent' },
-          headerBackButtonDisplayMode: 'minimal',
-          headerStyle: isIOS ? undefined : { backgroundColor: 'transparent' },
+          headerStyle: getTransparentHeaderStyle(),
           headerTransparent: isLiquidGlassAvailable,
         }}
       />

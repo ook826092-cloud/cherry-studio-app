@@ -5,20 +5,13 @@ import {
   type RuntimeProviderCallEvent,
 } from '@cherrystudio/ai-core';
 import { ENDPOINT_TYPE, MODEL_CAPABILITY } from '@cherrystudio/provider-registry';
-import {
-  type Assistant,
-  DEFAULT_ASSISTANT_SETTINGS,
-} from '@cherrystudio/universal/data/types/assistant';
-import {
-  createUniqueModelId,
-  type Model,
-  type UniqueModelId,
-} from '@cherrystudio/universal/data/types/model';
-import type { AuthConfig, Provider } from '@cherrystudio/universal/data/types/provider';
 import { InvalidToolInputError, type ToolSet } from 'ai';
 
 import { AiService, type AiServiceDependencies } from '@/backend/ai/AiService';
 import { createWebSearchTool } from '@/backend/ai/tools/adapters/aiSdk/builtin/WebSearchTool';
+import { type Assistant, DEFAULT_ASSISTANT_SETTINGS } from '@/shared/data/types/assistant';
+import { createUniqueModelId, type Model, type UniqueModelId } from '@/shared/data/types/model';
+import type { AuthConfig, Provider } from '@/shared/data/types/provider';
 
 const mockGenerate = jest.fn(async () => ({ text: 'ok', usage: undefined }));
 const mockStream = jest.fn(
@@ -54,31 +47,6 @@ const generateTextMock = aiCoreGenerateText as jest.MockedFunction<typeof aiCore
 describe('AiService.listModels authentication adapters', () => {
   afterEach(() => {
     jest.restoreAllMocks();
-  });
-
-  it('passes the Copilot serving-token adapter to model listing', async () => {
-    const provider = createProvider({
-      defaultChatEndpoint: ENDPOINT_TYPE.OPENAI_CHAT_COMPLETIONS,
-      endpointConfigs: {
-        [ENDPOINT_TYPE.OPENAI_CHAT_COMPLETIONS]: {
-          adapterFamily: 'github-copilot-openai-compatible',
-          baseUrl: 'https://api.githubcopilot.com',
-        },
-      },
-      id: 'copilot',
-      presetProviderId: 'copilot',
-    });
-    const services = createServices({ provider });
-    jest
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-    await new AiService(services).listModels({ providerId: provider.id, throwOnError: true });
-
-    expect(services.oauth.getCopilotServingToken).toHaveBeenCalledWith(
-      expect.objectContaining({ 'Editor-Plugin-Version': expect.any(String) }),
-      undefined,
-    );
   });
 
   it('passes the Vertex service-account adapter to model listing', async () => {
@@ -675,7 +643,6 @@ describe('AiService web search plugin wiring', () => {
       model,
       webSearchPreferences: {
         'chat.web_search.max_results': 42,
-        'chat.web_search.exclude_domains': ['blocked.com'],
       },
     });
     const service = new AiService(services);
@@ -1084,11 +1051,7 @@ describe('AiService MCP tool injection', () => {
   });
 });
 
-type TestAiServices = Omit<AiServiceDependencies, 'oauth' | 'tools' | 'vertexAuth'> & {
-  oauth: {
-    authenticatedFetch: jest.Mock;
-    getCopilotServingToken: jest.Mock;
-  };
+type TestAiServices = Omit<AiServiceDependencies, 'tools' | 'vertexAuth'> & {
   tools: {
     resolveForRequest: jest.Mock;
   };
@@ -1111,7 +1074,6 @@ function createServices({
   webSearchProviderId = null,
   webSearchPreferences = {
     'chat.web_search.max_results': 5,
-    'chat.web_search.exclude_domains': [],
   },
 }: {
   authConfig?: AuthConfig | null;
@@ -1124,7 +1086,6 @@ function createServices({
   webSearchProviderId?: string | null;
   webSearchPreferences?: {
     'chat.web_search.max_results': number;
-    'chat.web_search.exclude_domains': string[];
   };
 }): TestAiServices {
   const modelList = models ?? (model ? [model] : []);
@@ -1174,10 +1135,6 @@ function createServices({
     },
     model: {
       getById: jest.fn(async (id: UniqueModelId) => modelsById.get(id)),
-    },
-    oauth: {
-      authenticatedFetch: jest.fn(),
-      getCopilotServingToken: jest.fn(async () => 'copilot-serving-token'),
     },
     preference: {
       get: jest.fn(async () => webSearchProviderId),
@@ -1251,9 +1208,7 @@ function createAssistant(modelId: Model['id'] | null): Assistant {
     createdAt: '2026-01-01T00:00:00.000Z',
     description: '',
     emoji: '',
-    groupId: null,
     id: '00000000-0000-4000-8000-000000000001',
-    knowledgeBaseIds: [],
     mcpServerIds: [],
     modelId,
     modelName: null,
@@ -1267,7 +1222,6 @@ function createAssistant(modelId: Model['id'] | null): Assistant {
         { name: 'reasoning_effort', type: 'string', value: 'low' },
       ],
     },
-    tags: [],
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
 }

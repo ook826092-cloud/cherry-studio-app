@@ -1,6 +1,3 @@
-import type { JobSnapshot } from '@cherrystudio/universal/data/api/schemas/jobs';
-import type { ApiClient } from '@cherrystudio/universal/data/api/types';
-import type { Painting } from '@cherrystudio/universal/data/types/painting';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
@@ -8,6 +5,9 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { BackendProvider } from '@/frontend/data';
 import { DataApiProvider } from '@/frontend/data/DataApiProvider';
 import type { Backend } from '@/shared/contracts';
+import type { JobSnapshot } from '@/shared/data/api/schemas/jobs';
+import type { ApiClient } from '@/shared/data/api/types';
+import type { Painting } from '@/shared/data/types/painting';
 
 import { usePaintingGeneration } from '../usePaintingGeneration';
 
@@ -43,7 +43,6 @@ function jobSnapshot(overrides: Partial<JobSnapshot>): JobSnapshot {
     priority: 0,
     queue: 'painting',
     scheduledAt: '2026-01-01T00:00:00.000Z',
-    scheduleId: null,
     startedAt: '2026-01-01T00:00:00.000Z',
     status: 'running',
     timeoutMs: null,
@@ -151,6 +150,7 @@ const request = {
   ],
   mode: 'generate' as const,
   modelId: 'provider::gpt-image-2' as const,
+  modelName: 'GPT Image 2',
   paramValues: {},
   prompt: 'draw a cherry',
 };
@@ -213,6 +213,7 @@ describe('usePaintingGeneration', () => {
       ],
       mode: 'generate',
       modelId: 'provider::gpt-image-2',
+      modelName: 'GPT Image 2',
       paramValues: {},
       prompt: 'draw a cherry',
     });

@@ -1,7 +1,8 @@
 import type { ImageGenerationMode, ParamValues } from '@cherrystudio/provider-registry';
-import type { FileEntryId } from '@cherrystudio/universal/data/types/file';
-import type { UniqueModelId } from '@cherrystudio/universal/data/types/model';
-import type { Painting } from '@cherrystudio/universal/data/types/painting';
+
+import type { FileEntryId } from '@/shared/data/types/file';
+import type { UniqueModelId } from '@/shared/data/types/model';
+import type { Painting } from '@/shared/data/types/painting';
 
 import type { ResolvedFile } from './file';
 
@@ -17,6 +18,8 @@ export type PaintingGenerationInput = {
   images: readonly PaintingSourceImage[];
   mode: ImageGenerationMode;
   modelId: UniqueModelId;
+  /** Display-name snapshot used by background presentation while the job runs. */
+  modelName: string;
   /**
    * Retry an interrupted receipt in place rather than minting a new one. The
    * receipt must have no outputs — passing a finished painting is rejected,

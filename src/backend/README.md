@@ -11,13 +11,13 @@ isolation.
 | --- | --- |
 | [`data`](./data/README.md) | Desktop-aligned cache, preferences, SQLite, Data API handlers, and persistence services |
 | [`ai`](./ai/README.md) | AI SDK/provider adaptation, MCP runtime, app-owned Chat Runtime, and request tool resolution |
-| [`services`](./services/README.md) | Workflow module factories, mobile platform adapters and clients, OAuth, avatars, and web search |
+| [`services`](./services/README.md) | Workflow module factories, mobile platform adapters and clients, avatars, and web search |
 
 ## Alignment And Naming
 
 Direct Cherry Desktop counterparts keep their `Service` names, public methods, data contracts, and
 behavior. This includes the whole data layer plus `DataApiService`, `AiService`,
-`McpRuntimeService`, `OAuthRuntimeService`, and `WebSearchService`.
+`McpRuntimeService`, and `WebSearchService`.
 
 Mobile-only workflow and lifecycle code is named by ownership: frontend-visible `XxxModule`,
 app-owned `XxxRuntime`, caller-owned `XxxSession`, external `XxxClient`, platform `XxxAdapter` (or
@@ -29,5 +29,6 @@ preferences use `PreferenceClient`, and multi-step workflows use `BackendProvide
 `useBackendModule()`; concrete backend objects never enter frontend state.
 
 See [Architecture Overview](../../docs/references/architecture-overview.md),
+[Code Organization](../../docs/references/code-organization.md),
 [Runtime Ownership](../../docs/references/runtime-ownership.md), and
 [Naming Conventions](../../docs/references/naming-conventions.md).

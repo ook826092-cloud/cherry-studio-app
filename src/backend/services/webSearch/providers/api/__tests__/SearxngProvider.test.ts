@@ -1,5 +1,4 @@
-import type { WebSearchProvider } from '@cherrystudio/universal/data/preference';
-import type { WebSearchExecutionConfig } from '@cherrystudio/universal/data/types/webSearch';
+import type { WebSearchProvider, WebSearchExecutionConfig } from '@/shared/data/types/webSearch';
 
 import { ApiKeyRotationState } from '../../../utils/provider';
 import searxngSearchResponse from '../../__tests__/fixtures/searxng-search-response.json';
@@ -13,7 +12,6 @@ jest.mock('@/shared/core/logger/LoggerService', () => ({
 
 const runtimeConfig: WebSearchExecutionConfig = {
   maxResults: 5,
-  excludeDomains: [],
   compression: { method: 'none', cutoffLimit: 2000 },
 };
 

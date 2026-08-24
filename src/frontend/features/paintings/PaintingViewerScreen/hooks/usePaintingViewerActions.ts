@@ -1,12 +1,11 @@
-import type { Painting } from '@cherrystudio/universal/data/types/painting';
+import { useAlert, useToast } from '@cherrystudio/ui/components';
 import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
-import { useToast } from 'heroui-native/toast';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Linking } from 'react-native';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
+import type { Painting } from '@/shared/data/types/painting';
 
 import { useDeletePaintings } from '../../hooks/usePaintings';
 import { createPaintingDraftHandoff } from '../../utils/paintingDraftHandoff';

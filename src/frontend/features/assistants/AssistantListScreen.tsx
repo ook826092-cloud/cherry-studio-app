@@ -1,26 +1,26 @@
-import type { Assistant } from '@cherrystudio/universal/data/types/assistant';
-import { Stack, useRouter } from 'expo-router';
-import { BotIcon, CheckIcon, PlusIcon } from 'lucide-uniwind/png';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import BotIcon from '@cherrystudio/app-icons/icons/bot';
+import CheckIcon from '@cherrystudio/app-icons/icons/check';
+import EllipsisIcon from '@cherrystudio/app-icons/icons/ellipsis';
+import { type MenuItem, useAlert } from '@cherrystudio/ui/components';
+import { useRouter } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { type AccessibilityActionEvent, Pressable, ScrollView, Text, View } from 'react-native';
 import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 import Animated, { FadeInLeft, FadeOutLeft } from 'react-native-reanimated';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
-import { type HeaderToolbarAction, TabRootHeader } from '@/frontend/components/headers';
+import { RouteHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
+import { ContextMenuLink, type ContextMenuLinkItem } from '@/frontend/components/navigation';
 import {
   areAllSelected,
+  SelectionToolbar,
   toggleSelection,
-  useMessageListBottomInset,
-} from '@/frontend/components/messageTabs';
-import { SelectionToolbar } from '@/frontend/components/messageTabs/SelectionToolbar/SelectionToolbar';
-import {
-  ContextMenuLink,
-  type ContextMenuLinkItem,
-  useSetBottomTabBarHidden,
-} from '@/frontend/components/navigation';
+  useListBottomInset,
+} from '@/frontend/components/selection';
 import { useAssistantMutations, useAssistantsApi } from '@/frontend/hooks/chat';
+import type { Assistant } from '@/shared/data/types/assistant';
+
+import { AssistantListSearchBar } from './AssistantListSearchBar/AssistantListSearchBar';
 
 export default function AssistantListScreen() {
   const { t } = useTranslation();
@@ -28,8 +28,7 @@ export default function AssistantListScreen() {
   const { assistants, isLoading } = useAssistantsApi();
   const { deleteAssistant, deleteAssistants } = useAssistantMutations();
   const { alert } = useAlert();
-  const setBottomTabBarHidden = useSetBottomTabBarHidden();
-  const bottomInset = useMessageListBottomInset();
+  const bottomInset = useListBottomInset();
   const [isEditing, setIsEditing] = useState(false);
   const [pendingDeletionIds, setPendingDeletionIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -59,14 +58,6 @@ export default function AssistantListScreen() {
     );
   }, [searchText, visibleAssistants]);
 
-  useEffect(() => {
-    if (process.env.EXPO_OS !== 'android') {
-      return;
-    }
-
-    return () => setBottomTabBarHidden(false);
-  }, [setBottomTabBarHidden]);
-
   const enterEditing = useCallback(() => {
     if (isBatchDeleting) {
       return;
@@ -74,17 +65,11 @@ export default function AssistantListScreen() {
 
     setSearchText('');
     setIsEditing(true);
-    if (process.env.EXPO_OS === 'android') {
-      setBottomTabBarHidden(true);
-    }
-  }, [isBatchDeleting, setBottomTabBarHidden]);
+  }, [isBatchDeleting]);
   const exitEditing = useCallback(() => {
     setIsEditing(false);
     setSelectedIds(new Set());
-    if (process.env.EXPO_OS === 'android') {
-      setBottomTabBarHidden(false);
-    }
-  }, [setBottomTabBarHidden]);
+  }, []);
   const toggleAssistant = useCallback((assistantId: string) => {
     setSelectedIds((current) => toggleSelection(current, assistantId));
   }, []);
@@ -98,29 +83,45 @@ export default function AssistantListScreen() {
   const openCreateAssistant = useCallback(() => {
     router.push('/assistants/new');
   }, [router]);
+  const menuItems = useMemo<readonly MenuItem[]>(
+    () => [
+      {
+        id: 'create-assistant',
+        label: t('assistant.actions.add'),
+        onPress: openCreateAssistant,
+      },
+      {
+        disabled: visibleAssistants.length === 0 || isBatchDeleting,
+        id: 'select-assistants',
+        label: t('assistant.selection.start'),
+        onPress: enterEditing,
+      },
+    ],
+    [enterEditing, isBatchDeleting, openCreateAssistant, t, visibleAssistants.length],
+  );
   const rightActions = useMemo<HeaderToolbarAction[]>(
     () => [
       {
-        accessibilityLabel: t('assistant.actions.create'),
-        androidIcon: PlusIcon,
-        icon: 'plus',
-        key: 'create-assistant',
-        onPress: openCreateAssistant,
+        accessibilityLabel: t('common.more'),
+        icon: EllipsisIcon,
+        items: menuItems,
+        key: 'assistant-actions',
+        type: 'menu',
       },
     ],
-    [openCreateAssistant, t],
+    [menuItems, t],
   );
-  const leftActions = useMemo<HeaderToolbarAction[]>(
+  const doneActions = useMemo<HeaderToolbarAction[]>(
     () => [
       {
-        accessibilityLabel: t(isEditing ? 'common.done' : 'common.edit'),
-        disabled: visibleAssistants.length === 0 || isBatchDeleting,
-        key: 'edit-assistants',
-        label: t(isEditing ? 'common.done' : 'common.edit'),
-        onPress: isEditing ? exitEditing : enterEditing,
+        accessibilityLabel: t('common.done'),
+        key: 'finish-selecting-assistants',
+        label: t('common.done'),
+        onPress: exitEditing,
+        type: 'label',
       },
     ],
-    [enterEditing, exitEditing, isBatchDeleting, isEditing, t, visibleAssistants.length],
+    [exitEditing, t],
   );
   const openAssistantEditor = useCallback(
     (assistantId: string) => {
@@ -183,23 +184,11 @@ export default function AssistantListScreen() {
 
   return (
     <>
-      <TabRootHeader
-        leftActions={leftActions}
-        rightActions={isEditing ? undefined : rightActions}
+      <RouteHeader
+        rightActions={isEditing ? doneActions : rightActions}
         title={t('assistant.list.title')}
       />
-      {process.env.EXPO_OS === 'ios' && !isEditing ? (
-        <Stack.SearchBar
-          autoCapitalize="none"
-          hideNavigationBar={false}
-          hideWhenScrolling={false}
-          obscureBackground={false}
-          placeholder={t('navigation.search')}
-          placement="stacked"
-          onCancelButtonPress={() => setSearchText('')}
-          onChangeText={(event) => setSearchText(event.nativeEvent.text)}
-        />
-      ) : null}
+      <AssistantListSearchBar isEditing={isEditing} setSearchText={setSearchText} />
       <ScrollView
         alwaysBounceVertical={false}
         className="flex-1"
@@ -309,14 +298,12 @@ function AssistantListRow({
         id: 'edit',
         label: t('common.edit'),
         onPress: handleEditPress,
-        systemImage: 'pencil',
       },
       {
         destructive: true,
         id: 'delete',
         label: t('common.delete'),
         onPress: handleDeletePress,
-        systemImage: 'trash',
       },
     ],
     [handleDeletePress, handleEditPress, t],
@@ -338,13 +325,11 @@ function AssistantListRow({
             <View
               className={
                 isSelected
-                  ? 'size-6 items-center justify-center rounded-full bg-primary'
+                  ? 'size-6 items-center justify-center rounded-full bg-foreground'
                   : 'size-6 items-center justify-center rounded-full border-2 border-border-strong'
               }
             >
-              {isSelected ? (
-                <CheckIcon className="size-4 text-primary-foreground" strokeWidth={3} />
-              ) : null}
+              {isSelected ? <CheckIcon className="size-4 text-background" /> : null}
             </View>
           </Animated.View>
         ) : null}
@@ -384,7 +369,7 @@ function AssistantEmptyState({
   return (
     <View className="items-center justify-center gap-4 px-8 py-16">
       <View className="size-14 items-center justify-center rounded-full bg-secondary">
-        <BotIcon className="size-7 text-foreground" strokeWidth={2} />
+        <BotIcon className="size-7 text-foreground" />
       </View>
       <View className="items-center gap-1">
         <Text className="text-center font-semibold text-foreground text-lg">

@@ -41,13 +41,6 @@ import {
   endpointImpliedCapability,
   MODEL_CAPABILITY,
 } from '@cherrystudio/provider-registry';
-import type { ServingCredentialReceipt } from '@cherrystudio/universal/data/types/aiUsageRecord';
-import {
-  type Assistant,
-  DEFAULT_ASSISTANT_SETTINGS,
-} from '@cherrystudio/universal/data/types/assistant';
-import type { Model } from '@cherrystudio/universal/data/types/model';
-import type { Provider } from '@cherrystudio/universal/data/types/provider';
 import { isAnthropicModel, isFunctionCallingModel } from '@cherrystudio/universal/utils/model';
 import { type ToolCallRepairFunction, type ToolSet } from 'ai';
 import * as Crypto from 'expo-crypto';
@@ -58,7 +51,10 @@ import {
   providerRegistryService,
 } from '@/backend/data/services/ProviderRegistryService';
 import type { ProviderService } from '@/backend/data/services/ProviderService';
-import type { OAuthAuthenticatedFetch } from '@/backend/services/oauth/runtime/types';
+import type { ServingCredentialReceipt } from '@/shared/data/types/aiUsageRecord';
+import { type Assistant, DEFAULT_ASSISTANT_SETTINGS } from '@/shared/data/types/assistant';
+import type { Model } from '@/shared/data/types/model';
+import type { Provider } from '@/shared/data/types/provider';
 
 import { resolveProviderAiSdkConfig } from '../../../provider/config';
 import type { ToolResolver } from '../../../tools';
@@ -68,10 +64,6 @@ import { replacePromptVariables } from '../../../utils/promptVariables';
 import type { AgentOptions } from '../Agent';
 
 export interface BuildAgentParamsDependencies {
-  oauth: {
-    authenticatedFetch: OAuthAuthenticatedFetch;
-    getCopilotServingToken(headers: Record<string, string>, signal?: AbortSignal): Promise<string>;
-  };
   preference: PreferenceService;
   provider: Pick<ProviderService, 'getAuthConfig' | 'resolveApiKey'>;
   tools: Pick<ToolResolver, 'resolveForRequest'>;
@@ -123,10 +115,7 @@ export async function buildAgentParams({
     provider,
     model,
     {
-      authenticatedFetch: (providerId, buildRequest, doFetch, options) =>
-        services.oauth.authenticatedFetch(providerId, buildRequest, doFetch, options),
       getAuthConfig: (providerId) => services.provider.getAuthConfig(providerId),
-      getCopilotToken: (headers, signal) => services.oauth.getCopilotServingToken(headers, signal),
       resolveApiKey: (providerId, override) =>
         services.provider.resolveApiKey(providerId, override),
     },

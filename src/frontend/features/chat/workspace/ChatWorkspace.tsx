@@ -1,18 +1,15 @@
-import type { Message } from '@cherrystudio/universal/data/types/message';
+import { useAlert } from '@cherrystudio/ui/components';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
+import type { SharedValue } from 'react-native-reanimated';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
-import { useComposerDockLayout } from '@/frontend/components/composer';
-import {
-  MessageList,
-  type MessagePresentationItem,
-} from '@/frontend/components/messagePresentation';
+import { MessageList, type MessageListItem } from '@/frontend/components/messages';
+import { resolveHeaderContentInset } from '@/frontend/components/navigation';
 import type { MessagesViewModel } from '@/frontend/hooks/chat';
-import { isIOS } from '@/frontend/utils/constants';
 import { loggerService } from '@/shared/core/logger/LoggerService';
+import type { Message } from '@/shared/data/types/message';
 
 import { ToolApprovalSheet } from '../approval/ToolApprovalSheet';
 import { useChat, useChatTopic } from '../runtime/ChatProvider';
@@ -20,9 +17,10 @@ import {
   getPendingToolApprovals,
   mergeMessagesWithOverlay,
 } from '../runtime/chatRuntimeProjection';
-import { ChatComposer } from './components/ChatComposer';
 import { ChatInitialRenderCover } from './components/ChatInitialRenderCover';
+import { ChatMessage } from './components/ChatMessage';
 import { ChatOlderMessagesIndicator } from './components/ChatOlderMessagesIndicator';
+import { AssistantMessageActionsProvider } from './context/AssistantMessageActionsProvider';
 import {
   shouldWaitForInitialHistoryLayout,
   useMessageListInitialRenderGate,
@@ -32,8 +30,16 @@ const logger = loggerService.withContext('ChatWorkspace');
 // 诊断埋点：冷/暖首次进入 topic 的数据加载 + 遮罩可见性时序。`[GATE]` 前缀。
 const gateLog = loggerService.withContext('ChatGate');
 
+function renderChatMessage(message: MessageListItem) {
+  return <ChatMessage message={message} />;
+}
+
 type ChatWorkspaceProps = {
-  isPreview: boolean;
+  isAssistantToolbarEnabled: boolean;
+  /** 输入框实测高度，用于定位悬浮按钮；预览态没有输入框，留空即可。 */
+  bottomAccessoryHeight?: SharedValue<number>;
+  contentBottomInset: number;
+  keyboardOffset: number;
   messageWindow: Pick<
     MessagesViewModel,
     'isLoadingInitial' | 'isLoadingOlder' | 'loadOlder' | 'messages'
@@ -43,22 +49,26 @@ type ChatWorkspaceProps = {
 };
 
 export function ChatWorkspace({
-  isPreview,
+  bottomAccessoryHeight,
+  contentBottomInset,
+  keyboardOffset,
   messageWindow,
   renderGateKey,
+  isAssistantToolbarEnabled,
   topicId,
 }: ChatWorkspaceProps) {
   const { isLoadingInitial, isLoadingOlder, loadOlder, messages } = messageWindow;
   const chatTopic = useChatTopic(topicId);
+  const regenerateAssistantMessage = chatTopic.regenerate;
   const headerHeight = useHeaderHeight();
   const { t } = useTranslation();
   const { alert } = useAlert();
   const messagesWithUser = mergeMessagesWithOverlay(messages, chatTopic.pendingUserMessage);
   const visibleMessages = mergeMessagesWithOverlay(messagesWithUser, chatTopic.overlayMessage);
-  const presentationMessages = useMemo(
+  const listMessages = useMemo(
     () =>
       visibleMessages.filter(
-        (message): message is Message & MessagePresentationItem =>
+        (message): message is Message & MessageListItem =>
           message.role === 'user' || message.role === 'assistant',
       ),
     [visibleMessages],
@@ -87,42 +97,40 @@ export function ChatWorkspace({
     renderGateKey,
     requiresInitialHistoryLayout,
   });
-  const contentTopInset = isIOS ? headerHeight : 0;
-  const composerDockLayout = useComposerDockLayout();
-  const contentBottomInset = isPreview ? 12 : composerDockLayout.contentBottomInset;
-  const keyboardOffset = isPreview ? 0 : composerDockLayout.keyboardOffset;
+  const contentTopInset = resolveHeaderContentInset(headerHeight);
 
   // 冷/暖进入差异取证：记录 数据加载态 + 遮罩可见性 + 可见消息数 + 锚点 的每次变化。
   useEffect(() => {
     gateLog.debug('[GATE] state', {
       isLoadingInitial,
       isCoverVisible,
-      len: presentationMessages.length,
+      len: listMessages.length,
       t: Date.now(),
     });
-  }, [isLoadingInitial, isCoverVisible, presentationMessages.length]);
+  }, [isLoadingInitial, isCoverVisible, listMessages.length]);
 
   return (
-    <View className="flex-1 bg-background">
+    <View className="flex-1 bg-background-subtle">
       <ChatOlderMessagesIndicator isLoading={isLoadingOlder} />
-      <MessageList
-        key={listRenderKey}
-        bottomAccessoryHeight={isPreview ? undefined : composerDockLayout.inputHeightShared}
-        contentBottomInset={contentBottomInset}
-        contentTopInset={contentTopInset}
-        enteringMessageId={chatTopic.pendingUserMessage?.id}
-        keyboardOffset={keyboardOffset}
-        messages={presentationMessages}
-        onLoadOlder={loadOlder}
-        onReady={markListLoaded}
-      />
-      {isPreview ? null : (
-        <ChatComposer
-          dismissKeyboardOnSend={false}
-          onHeightChange={composerDockLayout.handleInputHeightChange}
-          topicId={topicId}
+      <AssistantMessageActionsProvider
+        key={topicId}
+        isAssistantToolbarEnabled={isAssistantToolbarEnabled}
+        isRegenerateDisabled={chatTopic.isBusy}
+        onRegenerate={regenerateAssistantMessage}
+      >
+        <MessageList
+          key={listRenderKey}
+          bottomAccessoryHeight={bottomAccessoryHeight}
+          contentBottomInset={contentBottomInset}
+          contentTopInset={contentTopInset}
+          enteringMessageId={chatTopic.pendingUserMessage?.id}
+          keyboardOffset={keyboardOffset}
+          messages={listMessages}
+          onLoadOlder={loadOlder}
+          onReady={markListLoaded}
+          renderMessage={renderChatMessage}
         />
-      )}
+      </AssistantMessageActionsProvider>
       <ChatInitialRenderCover isVisible={isCoverVisible} />
       <ToolApprovalSheet
         approvals={pendingApprovals}

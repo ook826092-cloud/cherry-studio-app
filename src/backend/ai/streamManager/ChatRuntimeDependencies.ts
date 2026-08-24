@@ -1,29 +1,27 @@
+import type { ReasoningEffortOption } from '@cherrystudio/universal/types/aiSdk';
+import type { UIMessageChunk } from 'ai';
+
+import type { BackgroundReplyLifecycle } from '@/backend/services/backgroundReply';
+import type { ChatToolApprovalInput } from '@/shared/contracts';
 import type {
   BranchMessagesQueryParams,
   CreateMessageDto,
-} from '@cherrystudio/universal/data/api/schemas/messages';
+} from '@/shared/data/api/schemas/messages';
+import type { BranchMessagesResponse } from '@/shared/data/api/schemas/messages';
+import type { CreateTopicDto, UpdateTopicDto } from '@/shared/data/api/schemas/topics';
+import type { Assistant } from '@/shared/data/types/assistant';
+import type { FileEntry } from '@/shared/data/types/file';
 import type {
-  CreateTopicDto,
-  UpdateTopicDto,
-} from '@cherrystudio/universal/data/api/schemas/topics';
-import type { Assistant } from '@cherrystudio/universal/data/types/assistant';
-import type { InternalFileEntry } from '@cherrystudio/universal/data/types/file';
-import type {
-  BranchMessagesResponse,
   CherryMessagePart,
   CherryUIMessage,
   Message,
   MessageData,
   MessageRuntimeStatsInput,
   MessageRuntimeTimingSink,
-} from '@cherrystudio/universal/data/types/message';
-import type { Model, UniqueModelId } from '@cherrystudio/universal/data/types/model';
-import type { Provider } from '@cherrystudio/universal/data/types/provider';
-import type { Topic } from '@cherrystudio/universal/data/types/topic';
-import type { ReasoningEffortOption } from '@cherrystudio/universal/types/aiSdk';
-import type { UIMessageChunk } from 'ai';
-
-import type { ChatToolApprovalInput } from '@/shared/contracts';
+} from '@/shared/data/types/message';
+import type { Model, UniqueModelId } from '@/shared/data/types/model';
+import type { Provider } from '@/shared/data/types/provider';
+import type { Topic } from '@/shared/data/types/topic';
 
 export type ChatStreamRequest = {
   assistantId?: string;
@@ -41,11 +39,25 @@ export type ChatStreamRequest = {
 
 type ApprovalDecision = Omit<ChatToolApprovalInput, 'messageId' | 'topicId'>;
 
+/**
+ * `id` is optional and caller-supplied: the runtime mints message ids before
+ * the write so it can publish the turn ahead of persistence, and the row that
+ * lands must carry the same identity the UI is already rendering.
+ */
+type CreateTurnPlaceholder = Omit<
+  CreateMessageDto,
+  'parentId' | 'setAsActive' | 'siblingsGroupId'
+> & {
+  id?: string;
+};
+
 type CreateTurnInput = {
-  placeholders: Omit<CreateMessageDto, 'parentId' | 'setAsActive' | 'siblingsGroupId'>[];
+  placeholders: CreateTurnPlaceholder[];
   siblingsGroupId?: number;
   topicId: string;
-  userMessage: { dto: CreateMessageDto; mode: 'create' } | { id: string; mode: 'existing' };
+  userMessage:
+    | { dto: CreateMessageDto; id?: string; mode: 'create' }
+    | { id: string; mode: 'existing' };
 };
 
 export type ChatRuntimeServices = {
@@ -86,6 +98,7 @@ export type ChatRuntimeServices = {
     getChildrenByParentId(parentId: string): Promise<Message[]>;
     getPathToNode(id: string): Promise<Message[]>;
     getPathThrough(topicId: string, nodeId: string): Promise<Message[]>;
+    newMessageId(): string;
     finalizeAssistantMessage(
       id: string,
       input: {
@@ -118,11 +131,12 @@ export type ChatRuntimeServices = {
 };
 
 export type ChatRuntimeDependencies = {
+  backgroundReply: BackgroundReplyLifecycle;
   files: {
     createParts(
       parts: readonly CherryMessagePart[],
-    ): Promise<{ entries: InternalFileEntry[]; parts: CherryMessagePart[] }>;
-    discard(entries: readonly InternalFileEntry[]): Promise<void>;
+    ): Promise<{ entries: FileEntry[]; parts: CherryMessagePart[] }>;
+    discard(entries: readonly FileEntry[]): Promise<void>;
   };
   services: ChatRuntimeServices;
 };

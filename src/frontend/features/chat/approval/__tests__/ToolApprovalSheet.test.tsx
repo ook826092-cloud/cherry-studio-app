@@ -1,6 +1,6 @@
 import { BottomSheet, Button } from '@cherrystudio/ui/components';
 import type { ReactNode } from 'react';
-import { ScrollView, Text } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { PendingToolApproval } from '../../runtime/chatRuntimeProjection';
@@ -27,8 +27,45 @@ jest.mock('@cherrystudio/ui/components', () => {
     return <MockView {...props}>{children}</MockView>;
   }
 
-  return { BottomSheet: MockBottomSheet, Button: MockButton };
+  const component = () =>
+    function MockBottomSheetPart({ children, ...props }: { children?: ReactNode }) {
+      return <MockView {...props}>{children}</MockView>;
+    };
+
+  const BottomSheet = Object.assign(MockBottomSheet, {
+    Body: component(),
+    CloseButton: component(),
+    Content: component(),
+    Header: component(),
+    HeaderSpacer: component(),
+    Title: component(),
+  });
+
+  return {
+    BottomSheet,
+    Button: MockButton,
+    useBottomSheet: () => ({
+      geometry: {
+        bottomCornerRadius: 28,
+        insets: { bottom: 34, left: 0, right: 0, top: 59 },
+        isContentSized: true,
+        outerInset: 4,
+        sheetWidth: 380,
+        topCornerRadius: 28,
+      },
+      isCloseDisabled: true,
+      isClosing: false,
+      requestClose: () => undefined,
+    }),
+  };
 });
+
+jest.mock('@/frontend/components/messages', () => ({
+  getBuiltInToolDisplay: (toolName: string) =>
+    toolName === 'location_get_current'
+      ? { titleKey: 'chat.builtinTool.location.current' }
+      : undefined,
+}));
 
 const allowLabel = 'chat.tool.approval.allow';
 const denyLabel = 'chat.tool.approval.deny';
@@ -112,7 +149,15 @@ describe('ToolApprovalSheet', () => {
   test('cannot be dismissed while an approval is pending', () => {
     render();
 
-    expect(renderer.root.findByType(BottomSheet).props.isCloseDisabled).toBe(true);
+    expect(renderer.root.findByType(BottomSheet.Content).props.isCloseDisabled).toBe(true);
+  });
+
+  test('does not mount a sheet before an approval exists', () => {
+    act(() => {
+      renderer = create(<ToolApprovalSheet approvals={[]} isOpen={false} onRespond={jest.fn()} />);
+    });
+
+    expect(renderer.root.findAllByType(BottomSheet)).toHaveLength(0);
   });
 
   test('hides the arguments preview scroll indicator', () => {
@@ -133,6 +178,18 @@ describe('ToolApprovalSheet', () => {
       approved: false,
       messageId: 'assistant-1',
     });
+  });
+
+  test('keeps the decision buttons clear of the home indicator', () => {
+    render();
+
+    // The card measures to its content and reaches the bottom of the screen, so
+    // the buttons are the last thing above the indicator. Padding them by the
+    // safe inset less the gap the card already leaves is what a user needs to be
+    // able to press deny at all.
+    expect(
+      StyleSheet.flatten(renderer.root.findByType(BottomSheet.Body).props.style),
+    ).toMatchObject({ paddingBottom: 30 });
   });
 
   test('uses a solid danger action for denial', () => {
@@ -205,7 +262,7 @@ describe('ToolApprovalSheet', () => {
     ]);
 
     expect(renderedTexts()).toContain('serverTwo: createFile');
-    expect(renderer.root.findByType(BottomSheet).props.isOpen).toBe(true);
+    expect(renderer.root.findByType(BottomSheet).props.open).toBe(true);
   });
 
   test('formats built-in tool names without exposing the internal prefix', () => {

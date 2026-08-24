@@ -1,7 +1,7 @@
 # Lifecycle Migration
 
-> Status: Stage A landed — the framework exists and is tested, and the `services` registry is
-> empty, so no module runs through it yet. B, D, and C are not started.
+> Status: Historical implementation plan. Stages A, B, D, and C are landed; the sections below
+> preserve the migration rationale and acceptance criteria.
 > Interfaces: [lifecycle-overview.md](./lifecycle-overview.md) ·
 > [resource-scope.md](./resource-scope.md)
 
@@ -97,16 +97,16 @@ is unreachable only because `globalThis` is checked first.
 
 Migrate in dependency order so each commit leaves a working app: `CacheService` → `DbService` →
 `PreferenceService` → `KeepAliveCoordinator` → `BackgroundActivityManager` → `WebSearchService` →
-`McpRuntimeService` → OAuth services → `ChatRuntime` → `JobRuntime` → feature modules.
+`McpRuntimeService` → `ChatRuntime` → `JobRuntime` → feature modules.
 
 Per module: extend `BaseService`, add decorators, move `initialize`-style work into `onInit`, move
 `dispose()` into `onStop`/`onDestroy`, replace hand-rolled `AppState` subscriptions with
 `registerAppStateListener`, and delete the module's construction from `createBackend.ts`.
 
-Closing commits: `AppBootstrapProvider` builds and installs an `ApplicationHost` instead of calling
-`createAppBootstrapRuntime()`; factory-shaped modules (`createJobRuntime`, `createMcpModule`, …)
-become classes; `JobRuntime`'s `liveRuntimesByDb` WeakMap is removed in favour of the container
-guard; `providerRegistryService` stops being a module-level escape and registers as a service.
+Closing commits install an `ApplicationHost` through `createAppBootstrapRuntime`; runtime-shaped
+modules become classes and `JobRuntime`'s `liveRuntimesByDb` WeakMap is removed in favour of the
+container guard. `providerRegistryService` remains package-level because its immutable bundled
+catalog is already memoized below the host; wrapping it would not create per-generation ownership.
 
 ## Stage D outline
 
@@ -172,6 +172,7 @@ Scenarios 1–5 are Stage D; 6–7 are Stage B; 8–9 hold today and gain the gu
 
 ## Verification per stage
 
-Each commit: `pnpm typecheck`, the targeted `pnpm test:app -- <pattern>`, lint, format. Full
-`pnpm test:app` once before opening each PR. Stage A additionally required a simulator cold start —
-the framework being inert is the claim, and only running the app proves it.
+Each commit used targeted tests, lint, and formatting for its behavior. Before each PR, run the
+current local gate in [Testing And CI](../../guides/testing-and-ci.md); the full suite belongs to
+remote CI. Stage A additionally required a simulator cold start because only running the app proves
+that the framework is inert.

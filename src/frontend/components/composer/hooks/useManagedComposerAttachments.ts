@@ -1,7 +1,7 @@
+import { useAlert } from '@cherrystudio/ui/components';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
 import { useBackendModule } from '@/frontend/data';
 import { loggerService } from '@/shared/core/logger/LoggerService';
 
@@ -12,6 +12,7 @@ import {
   type ComposerAttachmentReady,
   type ComposerAttachmentSource,
   type ComposerInitialAttachment,
+  isComposerAttachmentSupported,
   isComposerAttachmentReady,
   removeComposerAttachment,
 } from '../utils/composerAttachments';
@@ -27,13 +28,17 @@ export function useManagedComposerAttachments(
   const { t } = useTranslation();
   const { alert } = useAlert();
   const file = useBackendModule('file');
-  const initialAttachmentsRef = useRef(initialAttachments);
+  const [initialAttachmentState] = useState(() => {
+    const accepted = initialAttachments.filter(isComposerAttachmentSupported);
+    return { accepted, rejectedCount: initialAttachments.length - accepted.length };
+  });
+  const didReportRejectedInitialAttachmentsRef = useRef(false);
   const didImportInitialAttachmentsRef = useRef(false);
   const isMountedRef = useRef(true);
   const importTokensRef = useRef(new Map<string, symbol>());
   const cancelledImportTokensRef = useRef(new Set<symbol>());
   const [attachments, setAttachmentState] = useState<ComposerAttachmentDraft[]>(() =>
-    initialAttachments.map((attachment) =>
+    initialAttachmentState.accepted.map((attachment) =>
       isComposerAttachmentReady(attachment)
         ? attachment
         : { ...attachment, status: 'importing' as const },
@@ -49,9 +54,9 @@ export function useManagedComposerAttachments(
   const deleteEntry = useCallback(
     async (entryId: ComposerAttachmentReady['fileEntryId']) => {
       try {
-        await file.deleteIfUnreferenced(entryId);
+        await file.delete(entryId);
       } catch (error) {
-        logger.warn('Failed to delete an unreferenced attachment', toError(error), { entryId });
+        logger.warn('Failed to delete a cancelled attachment', toError(error), { entryId });
       }
     },
     [file],
@@ -59,22 +64,38 @@ export function useManagedComposerAttachments(
 
   const importAttachment = useCallback(
     async (source: ComposerAttachmentSource, token: symbol): Promise<ImportResult> => {
+      const startedAt = Date.now();
+      let importedSize = source.size;
+      const finishImport = (result: ImportResult) => {
+        if (__DEV__) {
+          logger.debug('Attachment import finished', {
+            durationMs: Date.now() - startedAt,
+            kind: source.kind,
+            result,
+            size: importedSize ?? null,
+          });
+        }
+        return result;
+      };
+
       try {
         const resolved = await file.createInternalEntry({
+          mediaType: source.mediaType,
           name: source.name,
           uri: source.uri,
         });
+        importedSize = resolved.entry.size;
 
         if (cancelledImportTokensRef.current.delete(token)) {
           await deleteEntry(resolved.entry.id);
-          return 'ignored';
+          return finishImport('ignored');
         }
         if (!isMountedRef.current) {
-          return 'ignored';
+          return finishImport('ignored');
         }
         if (importTokensRef.current.get(source.id) !== token) {
           await deleteEntry(resolved.entry.id);
-          return 'ignored';
+          return finishImport('ignored');
         }
 
         importTokensRef.current.delete(source.id);
@@ -84,20 +105,20 @@ export function useManagedComposerAttachments(
               ? {
                   ...source,
                   fileEntryId: resolved.entry.id,
-                  size: resolved.entry.origin === 'internal' ? resolved.entry.size : source.size,
+                  size: importedSize,
                   status: 'ready' as const,
                   uri: resolved.uri,
                 }
               : attachment,
           ),
         );
-        return 'ready';
+        return finishImport('ready');
       } catch (error) {
         if (cancelledImportTokensRef.current.delete(token)) {
-          return 'ignored';
+          return finishImport('ignored');
         }
         if (importTokensRef.current.get(source.id) !== token || !isMountedRef.current) {
-          return 'ignored';
+          return finishImport('ignored');
         }
 
         importTokensRef.current.delete(source.id);
@@ -106,7 +127,7 @@ export function useManagedComposerAttachments(
           name: source.name,
           uri: source.uri,
         });
-        return 'failed';
+        return finishImport('failed');
       }
     },
     [commitAttachments, deleteEntry, file],
@@ -133,8 +154,12 @@ export function useManagedComposerAttachments(
 
   const addAttachments = useCallback(
     (nextAttachments: ComposerAttachmentDraft[]) => {
+      const supportedAttachments = nextAttachments.filter(isComposerAttachmentSupported);
+      if (supportedAttachments.length < nextAttachments.length) {
+        alert.show({ title: t('chat.attachments.unsupportedImageFormat') });
+      }
       const seenIds = new Set(attachmentsRef.current.map((attachment) => attachment.id));
-      const accepted = nextAttachments.filter((attachment) => {
+      const accepted = supportedAttachments.filter((attachment) => {
         if (seenIds.has(attachment.id)) return false;
         seenIds.add(attachment.id);
         return true;
@@ -153,7 +178,7 @@ export function useManagedComposerAttachments(
       commitAttachments(appendComposerAttachments(attachmentsRef.current, staged));
       if (sources.length > 0) void importAttachments(sources);
     },
-    [commitAttachments, importAttachments],
+    [alert, commitAttachments, importAttachments, t],
   );
 
   const removeAttachment = useCallback(
@@ -187,9 +212,16 @@ export function useManagedComposerAttachments(
 
   useEffect(() => {
     isMountedRef.current = true;
+    if (
+      initialAttachmentState.rejectedCount > 0 &&
+      !didReportRejectedInitialAttachmentsRef.current
+    ) {
+      didReportRejectedInitialAttachmentsRef.current = true;
+      alert.show({ title: t('chat.attachments.unsupportedImageFormat') });
+    }
     if (!didImportInitialAttachmentsRef.current) {
       didImportInitialAttachmentsRef.current = true;
-      const sources = initialAttachmentsRef.current.filter(
+      const sources = initialAttachmentState.accepted.filter(
         (attachment): attachment is ComposerAttachmentSource =>
           !isComposerAttachmentReady(attachment),
       );
@@ -199,7 +231,7 @@ export function useManagedComposerAttachments(
     return () => {
       isMountedRef.current = false;
     };
-  }, [importAttachments]);
+  }, [alert, importAttachments, initialAttachmentState, t]);
 
   return useMemo(
     () => ({

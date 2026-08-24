@@ -1,5 +1,4 @@
-import type { WebSearchProvider } from '@cherrystudio/universal/data/preference';
-import type { WebSearchExecutionConfig } from '@cherrystudio/universal/data/types/webSearch';
+import type { WebSearchProvider, WebSearchExecutionConfig } from '@/shared/data/types/webSearch';
 
 import { ApiKeyRotationState } from '../../../utils/provider';
 import zhipuResponseFixture from '../../__tests__/fixtures/zhipu-response.json';
@@ -7,7 +6,6 @@ import { ZhipuProvider } from '../ZhipuProvider';
 
 const runtimeConfig: WebSearchExecutionConfig = {
   maxResults: 2,
-  excludeDomains: [],
   compression: { method: 'none', cutoffLimit: 2000 },
 };
 

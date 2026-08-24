@@ -1,4 +1,4 @@
-import { PlusIcon } from 'lucide-uniwind/png';
+import PlusIcon from '@cherrystudio/app-icons/icons/plus';
 import {
   createContext,
   use,
@@ -9,7 +9,14 @@ import {
   useRef,
   useState,
 } from 'react';
-import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  type LayoutChangeEvent,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import Animated, {
   interpolate,
   runOnJS,
@@ -18,13 +25,13 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { useResolveClassNames } from 'uniwind';
 
 import { Portal } from '../../../portal';
 import { Surface } from '../../../surface';
-import { composerActionSize } from '../../composer.layout';
-import { menuFadeMotion, menuOpenMotion, settleMotion } from '../../composer.motion';
-import type { MorphMenuItemProps, MorphMenuProps } from './morph-menu.types';
+import { Switch } from '../../../switch';
+import { composerActionSize } from '../../utils/composer-layout';
+import { menuFadeMotion, menuOpenMotion, settleMotion } from '../../utils/composer-motion';
+import type { MorphMenuItemProps, MorphMenuProps, MorphMenuToggleProps } from './morph-menu.types';
 
 // It sits in the composer's toolbar, so it defaults to the same circle as the
 // tools beside it.
@@ -32,7 +39,11 @@ const defaultTriggerSize = composerActionSize;
 const openRadius = 20;
 // A floor, not a size: a menu of three short labels would otherwise hug them and
 // read as a tooltip. Content wider than this drives the panel instead.
-const defaultMinPanelWidth = 200;
+//
+// Proportional rather than fixed, because what has to fit is a translated label
+// beside a trailing control, and that pair scales with the screen, not with a
+// number chosen on one device.
+const defaultPanelWidthRatio = 0.6;
 // Only ever on screen for the frame before the first measurement lands.
 const fallbackPanelHeight = 172;
 
@@ -78,12 +89,13 @@ export function useComposerMenu() {
 function MorphMenuRoot({
   accessibilityLabel,
   children,
-  onOpenChange,
   style,
   testID,
   triggerSize = defaultTriggerSize,
-  width = defaultMinPanelWidth,
+  width,
 }: MorphMenuProps) {
+  const windowWidth = useWindowDimensions().width;
+  const minPanelWidth = width ?? Math.round(windowWidth * defaultPanelWidthRatio);
   const [isOpen, setIsOpen] = useState(false);
   // Where the trigger sat when the menu opened. Non-null means the menu is
   // floating in the portal; it stays there until the close animation lands, so
@@ -92,14 +104,9 @@ function MorphMenuRoot({
   const isReducedMotion = useReducedMotion();
   const progress = useSharedValue(0);
   const panelHeight = useSharedValue(fallbackPanelHeight);
-  const panelWidth = useSharedValue(width);
+  const panelWidth = useSharedValue(minPanelWidth);
   const footprintRef = useRef<View>(null);
   const portalName = useId();
-  // The same colour on both branches: `GlassView` ignores className, and an
-  // untinted one is invisible when it sits on another glass surface — the
-  // material has nothing behind it to refract. A menu that opens out of a
-  // composer's toolbar does exactly that.
-  const material = useResolveClassNames('bg-secondary');
   const triggerFootprint = useMemo(
     () => ({ height: triggerSize, width: triggerSize }),
     [triggerSize],
@@ -113,7 +120,6 @@ function MorphMenuRoot({
 
     if (isReducedMotion) {
       progress.set(0);
-      setAnchor(null);
       return;
     }
 
@@ -130,8 +136,12 @@ function MorphMenuRoot({
 
   const close = useCallback(() => {
     setIsOpen(false);
-    onOpenChange?.(false);
-  }, [onOpenChange]);
+
+    if (isReducedMotion) {
+      progress.set(0);
+      setAnchor(null);
+    }
+  }, [isReducedMotion, progress]);
   const toggle = () => {
     if (isOpen) {
       close();
@@ -140,10 +150,14 @@ function MorphMenuRoot({
 
     // Measured before the state flip so the floating copy mounts exactly where
     // the inline trigger was — otherwise the morph starts from a jump.
+    //
+    // Nothing may move the composer between this measurement and the open: the
+    // anchor is a snapshot and never re-measures, so a layout change here leaves
+    // the panel floating away from its trigger. The ＋ menu used to take the
+    // keyboard down right after this callback and did exactly that.
     footprintRef.current?.measureInWindow((x, y) => {
       setAnchor({ left: x, top: y });
       setIsOpen(true);
-      onOpenChange?.(true);
     });
   };
   // Every item subscribes to this, so a fresh object each render would re-render
@@ -206,18 +220,11 @@ function MorphMenuRoot({
         {/* The panel stays inside the surface: an empty `GlassView` draws no
             material at all, so the two cannot be split into siblings to fade
             them separately. */}
-        <Surface
-          className="bg-secondary"
-          cornerRadius={openRadius}
-          style={fillStyle}
-          tintColor={
-            typeof material.backgroundColor === 'string' ? material.backgroundColor : undefined
-          }
-        >
+        <Surface className="bg-secondary" cornerRadius={openRadius} style={fillStyle}>
           <Animated.View
             onLayout={handlePanelLayout}
             pointerEvents={isOpen ? 'auto' : 'none'}
-            style={[panelContentStyle, { minWidth: width }, panelStyle]}
+            style={[panelContentStyle, { minWidth: minPanelWidth }, panelStyle]}
             testID={testID ? `${testID}-panel` : undefined}
           >
             {children}
@@ -236,7 +243,7 @@ function MorphMenuRoot({
         testID={testID ? `${testID}-trigger` : undefined}
       >
         <Animated.View style={plusStyle}>
-          <PlusIcon className="size-6 text-foreground" strokeWidth={2} />
+          <PlusIcon className="size-6 text-foreground" />
         </Animated.View>
       </Pressable>
     </MorphMenuContext>
@@ -274,6 +281,8 @@ function MorphMenuRoot({
   );
 }
 
+const rowClassName = 'h-11 flex-row items-center gap-3 rounded-xl px-3 active:bg-secondary-active';
+
 function MorphMenuItem({ icon, label, onPress, selected, testID, trailing }: MorphMenuItemProps) {
   const { close } = useComposerMenu();
 
@@ -282,7 +291,7 @@ function MorphMenuItem({ icon, label, onPress, selected, testID, trailing }: Mor
       accessibilityLabel={label}
       accessibilityRole="menuitem"
       accessibilityState={{ selected }}
-      className="h-11 flex-row items-center gap-3 rounded-xl px-3 active:bg-secondary-active"
+      className={rowClassName}
       onPress={() => {
         close();
         onPress();
@@ -298,10 +307,62 @@ function MorphMenuItem({ icon, label, onPress, selected, testID, trailing }: Mor
   );
 }
 
+/**
+ * A setting rather than an action, shown as a switch. It still closes the menu
+ * on press like every other row: the menu is a single decision either way, and
+ * a row that stayed put after being pressed would read as a different kind of
+ * control than the ones above it.
+ */
+function MorphMenuToggle({
+  disabled,
+  icon,
+  label,
+  onValueChange,
+  testID,
+  value,
+}: MorphMenuToggleProps) {
+  const { close } = useComposerMenu();
+
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value, disabled }}
+      className={rowClassName}
+      disabled={disabled}
+      onPress={() => {
+        close();
+        onValueChange(!value);
+      }}
+      testID={testID}
+    >
+      {icon}
+      <Text className="flex-1 text-base text-foreground" numberOfLines={1}>
+        {label}
+      </Text>
+      {/* The whole row is the hit target, so the switch must not take the touch
+          itself — it would fire its own change on top of the row's. */}
+      <View pointerEvents="none">
+        <Switch
+          accessibilityLabel={label}
+          disabled={disabled}
+          onValueChange={onValueChange}
+          size="sm"
+          value={value}
+        />
+      </View>
+    </Pressable>
+  );
+}
+
 MorphMenuRoot.displayName = 'Composer.Menu';
 MorphMenuItem.displayName = 'Composer.Menu.Item';
+MorphMenuToggle.displayName = 'Composer.Menu.Toggle';
 
-export const MorphMenu = Object.assign(MorphMenuRoot, { Item: MorphMenuItem });
+export const MorphMenu = Object.assign(MorphMenuRoot, {
+  Item: MorphMenuItem,
+  Toggle: MorphMenuToggle,
+});
 
 const fillStyle = { height: '100%', width: '100%' } as const;
 // Pinned bottom-left so the panel grows up and to the right out of the button,

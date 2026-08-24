@@ -1,42 +1,30 @@
-import { Input, Label, TextField } from '@cherrystudio/ui/components';
-import {
-  withMcpToolRuleAdded,
-  withMcpToolRuleCleared,
-} from '@cherrystudio/universal/ai/tools/mcpSourcePolicy';
-import { DataApiError, ErrorCode } from '@cherrystudio/universal/data/api/types';
-import type { StreamableHttpMcpServer } from '@cherrystudio/universal/data/types/mcpServer';
+import { Button, Input, Label, TextField, useAlert, useToast } from '@cherrystudio/ui/components';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useToast } from 'heroui-native/toast';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
-import { BackHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
+import { RouteHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
 import { useBackendModule } from '@/frontend/data';
 import { useMcpServerApiById, useMcpServerMutations } from '@/frontend/hooks/mcp/useMcpServers';
 import { keyboardBottomOffset } from '@/frontend/utils/constants';
 import { loggerService } from '@/shared/core/logger/LoggerService';
+import { DataApiError, ErrorCode } from '@/shared/data/api/errors';
+import type { McpServer } from '@/shared/data/types/mcpServer';
 
-import { SettingsDialogActionButton } from '../components/SettingsDialogActionButton';
-import { McpHeadersEditor } from './components/McpHeadersEditor';
 import { McpServerChrome } from './components/McpServerChrome/McpServerChrome';
 import { McpServerTabs } from './components/McpServerTabs/McpServerTabs';
 import type { McpServerTab } from './components/McpServerTabs/types';
 import { McpToolsSection } from './components/McpToolsSection';
-import { parseHeaderText, serializeHeaders } from './utils/headerText';
 
 const logger = loggerService.withContext('McpServerScreen');
 
 const NEW_SERVER_SENTINEL = 'new';
 
 type McpServerFormState = {
-  baseUrl: string;
-  description: string;
-  headerText: string;
+  endpointUrl: string;
   name: string;
-  timeout: string;
 };
 
 export function McpServerScreen() {
@@ -86,7 +74,7 @@ function McpServerLoadState({
 
   return (
     <>
-      <BackHeader title={t('settings.mcp.tabs.configuration')} />
+      <RouteHeader title={t('settings.mcp.tabs.configuration')} />
       <View className="flex-1 items-center justify-center gap-3 px-6">
         {isLoading ? <ActivityIndicator size="small" /> : null}
         <Text
@@ -104,20 +92,16 @@ function McpServerLoadState({
           </Text>
         ) : null}
         {onRetry ? (
-          <SettingsDialogActionButton label={t('settings.mcp.retry')} onPress={onRetry} />
+          <Button size="sm" variant="secondary" onPress={onRetry}>
+            {t('settings.mcp.retry')}
+          </Button>
         ) : null}
       </View>
     </>
   );
 }
 
-function McpServerEditor({
-  server,
-  serverId,
-}: {
-  server?: StreamableHttpMcpServer;
-  serverId?: string;
-}) {
+function McpServerEditor({ server, serverId }: { server?: McpServer; serverId?: string }) {
   const { t } = useTranslation();
   const router = useRouter();
   const { toast } = useToast();
@@ -149,7 +133,7 @@ function McpServerEditor({
   const handleSave = useCallback(async () => {
     const dto = buildDto(form, t('settings.mcp.defaultName'));
     if (!dto.ok) {
-      alert.show({ title: t(dto.errorKey, dto.errorOptions) });
+      alert.show({ title: t(dto.errorKey) });
       return;
     }
 
@@ -159,18 +143,9 @@ function McpServerEditor({
         await updateServer(serverId, dto.value);
         setIsEditing(false);
       } else {
-        const serverInfo = await mcp.getServerInfo({
-          baseUrl: dto.value.baseUrl,
-          headers: dto.value.headers,
-        });
+        const serverInfo = await mcp.getServerInfo({ endpointUrl: dto.value.endpointUrl });
         const name = serverInfo.title?.trim() || serverInfo.name.trim() || dto.value.name;
-        const description = serverInfo.instructions?.trim() || dto.value.description;
-        const createdServer = await createServer({
-          ...dto.value,
-          description,
-          isActive: true,
-          name,
-        });
+        const createdServer = await createServer({ ...dto.value, isEnabled: true, name });
         setIsEditing(false);
         router.replace({
           params: { serverId: createdServer.id },
@@ -185,59 +160,41 @@ function McpServerEditor({
     }
   }, [alert, createServer, form, mcp, router, serverId, t, updateServer]);
 
-  const handleToggleTool = useCallback(
-    async (toolName: string, enabled: boolean, knownToolNames: string[]) => {
-      if (!serverId || !server) {
-        return;
-      }
-      // The switch renders off for wire ids and wildcards too, so turning it
-      // back on has to clear those forms as well.
-      const nextDisabled = enabled
-        ? withMcpToolRuleCleared(server.disabledTools, server, toolName, knownToolNames)
-        : withMcpToolRuleAdded(server.disabledTools, toolName);
-      try {
-        await updateServer(serverId, { disabledTools: nextDisabled });
-      } catch (error) {
-        logger.error('Failed to toggle MCP tool', error as Error);
-        alert.show({ title: t('settings.mcp.toast.saveFailed') });
-      }
-    },
-    [alert, server, serverId, t, updateServer],
-  );
-
-  const handleToggleAutoApprove = useCallback(
-    async (toolName: string, autoApprove: boolean, knownToolNames: string[]) => {
-      if (!serverId || !server) {
-        return;
-      }
-      // Listed = force prompt, so auto-approve ON clears the rule (re-expanding
-      // wildcards like the enable toggle) and OFF appends the tool.
-      const nextDisabled = autoApprove
-        ? withMcpToolRuleCleared(server.disabledAutoApproveTools, server, toolName, knownToolNames)
-        : withMcpToolRuleAdded(server.disabledAutoApproveTools, toolName);
-      try {
-        await updateServer(serverId, { disabledAutoApproveTools: nextDisabled });
-      } catch (error) {
-        logger.error('Failed to toggle MCP tool auto-approve', error as Error);
-        alert.show({ title: t('settings.mcp.toast.saveFailed') });
-      }
-    },
-    [alert, server, serverId, t, updateServer],
-  );
-
   const handleToggleServer = useCallback(async () => {
     if (!serverId || !server) {
       return;
     }
 
-    const nextIsActive = !server.isActive;
     try {
-      await updateServer(serverId, { isActive: nextIsActive });
+      await updateServer(serverId, { isEnabled: !server.isEnabled });
     } catch (error) {
       logger.error('Failed to toggle MCP server', error as Error);
       alert.show({ title: t('settings.mcp.toast.saveFailed') });
     }
   }, [alert, server, serverId, t, updateServer]);
+
+  /**
+   * A rule is the tool's raw name, so enabling drops that one entry and
+   * disabling adds it. The row is the source of truth; the switch reads back
+   * from it once the write lands.
+   */
+  const handleToggleTool = useCallback(
+    (toolName: string, enabled: boolean) => {
+      if (!serverId || !server) {
+        return;
+      }
+
+      const disabledTools = enabled
+        ? server.disabledTools.filter((name) => name !== toolName)
+        : [...server.disabledTools, toolName];
+
+      void updateServer(serverId, { disabledTools }).catch((error) => {
+        logger.error('Failed to toggle MCP tool', error as Error);
+        alert.show({ title: t('settings.mcp.toast.saveFailed') });
+      });
+    },
+    [alert, server, serverId, t, updateServer],
+  );
 
   const handleDelete = useCallback(() => {
     if (!serverId) {
@@ -273,22 +230,27 @@ function McpServerEditor({
   const isBusy = isSaving || isCreateMutationPending || isUpdating;
   const saveActions = useMemo<HeaderToolbarAction[]>(
     () => [
-      {
-        accessibilityLabel: t('common.save'),
-        disabled: isBusy,
-        element: isBusy ? (
-          <ActivityIndicator
-            accessibilityLabel={t('common.save')}
-            size="small"
-            style={styles.headerActivityIndicator}
-          />
-        ) : undefined,
-        key: 'save',
-        label: t('common.save'),
-        onPress: () => {
-          void handleSave();
-        },
-      },
+      isBusy
+        ? {
+            element: (
+              <ActivityIndicator
+                accessibilityLabel={t('common.save')}
+                size="small"
+                style={styles.headerActivityIndicator}
+              />
+            ),
+            key: 'save',
+            type: 'custom',
+          }
+        : {
+            accessibilityLabel: t('common.save'),
+            key: 'save',
+            label: t('common.save'),
+            onPress: () => {
+              void handleSave();
+            },
+            type: 'label',
+          },
     ],
     [handleSave, isBusy, t],
   );
@@ -302,19 +264,20 @@ function McpServerEditor({
           setForm(createFormState(server));
           setIsEditing(true);
         },
+        type: 'label',
       },
     ],
     [server, t],
   );
 
   const displayedForm = isEditing ? form : createFormState(server);
-  const showHttpWarning = displayedForm.baseUrl.trim().toLowerCase().startsWith('http://');
+  const showHttpWarning = displayedForm.endpointUrl.trim().toLowerCase().startsWith('http://');
   const canShowTools = Boolean(serverId && server);
   const visibleTab = canShowTools ? activeTab : 'configuration';
 
   return (
     <>
-      <BackHeader
+      <RouteHeader
         rightActions={
           visibleTab === 'configuration' ? (isEditing ? saveActions : editActions) : undefined
         }
@@ -350,46 +313,20 @@ function McpServerEditor({
               />
             </FormField>
           ) : null}
-          <FormField isDisabled={!isEditing} label={t('settings.mcp.fields.baseUrl')}>
+          <FormField isDisabled={!isEditing} label={t('settings.mcp.fields.endpointUrl')}>
             <Input
-              accessibilityLabel={t('settings.mcp.fields.baseUrl')}
+              accessibilityLabel={t('settings.mcp.fields.endpointUrl')}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
-              onChangeText={(value) => updateField('baseUrl', value)}
+              onChangeText={(value) => updateField('endpointUrl', value)}
               placeholder="https://example.com/mcp"
               spellCheck={false}
-              value={displayedForm.baseUrl}
+              value={displayedForm.endpointUrl}
             />
             {showHttpWarning ? (
               <Text className="text-warning text-xs">{t('settings.mcp.fields.httpWarning')}</Text>
             ) : null}
-          </FormField>
-          {!isCreating ? (
-            <FormField isDisabled={!isEditing} label={t('settings.mcp.fields.description')}>
-              <Input
-                accessibilityLabel={t('settings.mcp.fields.description')}
-                onChangeText={(value) => updateField('description', value)}
-                placeholder={t('settings.mcp.fields.description')}
-                value={displayedForm.description}
-              />
-            </FormField>
-          ) : null}
-          <FormField isDisabled={!isEditing} label={t('settings.mcp.headers.title')}>
-            <McpHeadersEditor
-              onChangeText={(value) => updateField('headerText', value)}
-              value={displayedForm.headerText}
-            />
-          </FormField>
-          <FormField isDisabled={!isEditing} label={t('settings.mcp.fields.timeout')}>
-            <Input
-              accessibilityLabel={t('settings.mcp.fields.timeout')}
-              inputMode="numeric"
-              keyboardType="number-pad"
-              onChangeText={(value) => updateField('timeout', value)}
-              placeholder="60"
-              value={displayedForm.timeout}
-            />
           </FormField>
         </KeyboardAwareScrollView>
       ) : server ? (
@@ -401,21 +338,16 @@ function McpServerEditor({
           style={styles.scroll}
         >
           <View className="rounded-2xl bg-grouped-surface p-4">
-            <McpToolsSection
-              isReadOnly={isUpdating}
-              onToggleAutoApprove={handleToggleAutoApprove}
-              onToggleTool={handleToggleTool}
-              server={server}
-            />
+            <McpToolsSection isDisabled={isBusy} onToggleTool={handleToggleTool} server={server} />
           </View>
         </ScrollView>
       ) : null}
       {serverId && server ? (
         <McpServerChrome
-          isActive={server.isActive}
           isDisabled={isEditing || isBusy || isDeleting}
+          isEnabled={server.isEnabled}
           onDelete={requestDelete}
-          onToggleActive={() => {
+          onToggleEnabled={() => {
             void handleToggleServer();
           }}
         />
@@ -441,74 +373,44 @@ function FormField({
   );
 }
 
-function createFormState(server?: StreamableHttpMcpServer): McpServerFormState {
+function createFormState(server?: McpServer): McpServerFormState {
   return {
-    baseUrl: server?.baseUrl ?? '',
-    description: server?.description ?? '',
-    headerText: serializeHeaders(server?.headers),
+    endpointUrl: server?.endpointUrl ?? '',
     name: server?.name ?? '',
-    timeout: server?.timeout != null ? String(server.timeout) : '',
   };
 }
 
 function buildDto(
   form: McpServerFormState,
   defaultName: string,
-):
-  | { errorKey: string; errorOptions?: { line: number }; ok: false }
-  | { ok: true; value: McpServerConfigurationDto } {
-  const baseUrl = form.baseUrl.trim();
+): { errorKey: string; ok: false } | { ok: true; value: McpServerConfigurationDto } {
+  const endpointUrl = form.endpointUrl.trim();
   try {
-    const parsedUrl = new URL(baseUrl);
+    const parsedUrl = new URL(endpointUrl);
     if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-      return { errorKey: 'settings.mcp.fields.baseUrlInvalid', ok: false };
+      return { errorKey: 'settings.mcp.fields.endpointUrlInvalid', ok: false };
     }
   } catch {
-    return { errorKey: 'settings.mcp.fields.baseUrlInvalid', ok: false };
-  }
-
-  const trimmedTimeout = form.timeout.trim();
-  let timeout: number | null = null;
-  if (trimmedTimeout) {
-    const parsed = Number(trimmedTimeout);
-    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-      return { errorKey: 'settings.mcp.fields.timeoutInvalid', ok: false };
-    }
-    timeout = parsed;
-  }
-
-  const parsedHeaders = parseHeaderText(form.headerText);
-  if (!parsedHeaders.ok) {
-    return {
-      errorKey: 'settings.mcp.headers.invalidLine',
-      errorOptions: { line: parsedHeaders.line },
-      ok: false,
-    };
+    return { errorKey: 'settings.mcp.fields.endpointUrlInvalid', ok: false };
   }
 
   return {
     ok: true,
     value: {
-      baseUrl,
-      description: form.description.trim(),
-      headers: parsedHeaders.headers,
-      name: form.name.trim() || getFallbackServerName(baseUrl, defaultName),
-      timeout,
+      endpointUrl,
+      name: form.name.trim() || getFallbackServerName(endpointUrl, defaultName),
     },
   };
 }
 
 type McpServerConfigurationDto = {
-  baseUrl: string;
-  description: string;
-  headers: Record<string, string>;
+  endpointUrl: string;
   name: string;
-  timeout: number | null;
 };
 
-function getFallbackServerName(baseUrl: string, defaultName: string): string {
+function getFallbackServerName(endpointUrl: string, defaultName: string): string {
   try {
-    return new URL(baseUrl).hostname || defaultName;
+    return new URL(endpointUrl).hostname || defaultName;
   } catch {
     return defaultName;
   }

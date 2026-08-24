@@ -1,4 +1,3 @@
-import type { FileEntryId } from '@cherrystudio/universal/data/types/file';
 import { useEffect } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -7,15 +6,18 @@ import type {
   ComposerAttachmentSource,
   ComposerInitialAttachment,
 } from '@/frontend/components/composer/utils/composerAttachments';
+import type { FileEntryId } from '@/shared/data/types/file';
 
 import { useManagedComposerAttachments } from '../useManagedComposerAttachments';
 
 const mockCreateInternalEntry = jest.fn();
-const mockDeleteIfUnreferenced = jest.fn(async () => true);
+const mockDeleteEntry = jest.fn(async () => true);
 const mockAlertShow = jest.fn();
+const mockLoggerDebug = jest.fn();
+const mockLoggerWarn = jest.fn();
 const mockFileModule = {
   createInternalEntry: mockCreateInternalEntry,
-  deleteIfUnreferenced: mockDeleteIfUnreferenced,
+  delete: mockDeleteEntry,
   getUri: jest.fn(),
 };
 
@@ -23,8 +25,17 @@ jest.mock('@/frontend/data', () => ({
   useBackendModule: () => mockFileModule,
 }));
 
-jest.mock('@/frontend/components/AlertProvider', () => ({
+jest.mock('@cherrystudio/ui/components', () => ({
   useAlert: () => ({ alert: { show: mockAlertShow } }),
+}));
+
+jest.mock('@/shared/core/logger/LoggerService', () => ({
+  loggerService: {
+    withContext: () => ({
+      debug: (...args: unknown[]) => mockLoggerDebug(...args),
+      warn: (...args: unknown[]) => mockLoggerWarn(...args),
+    }),
+  },
 }));
 
 jest.mock('react-i18next', () => ({
@@ -46,6 +57,7 @@ describe('useManagedComposerAttachments', () => {
   afterEach(async () => {
     await act(async () => renderer?.unmount());
     renderer = undefined;
+    jest.restoreAllMocks();
   });
 
   it('preserves source order and keeps successful imports when one item fails', async () => {
@@ -98,7 +110,7 @@ describe('useManagedComposerAttachments', () => {
     });
 
     expect(snapshot?.attachments).toEqual([]);
-    expect(mockDeleteIfUnreferenced).toHaveBeenCalledWith('00000000-0000-7000-8000-000000000003');
+    expect(mockDeleteEntry).toHaveBeenCalledWith('00000000-0000-7000-8000-000000000003');
   });
 
   it('safely deletes a ready attachment when the user removes it', async () => {
@@ -108,7 +120,7 @@ describe('useManagedComposerAttachments', () => {
     await act(async () => snapshot?.removeAttachment(ready.id));
 
     expect(snapshot?.attachments).toEqual([]);
-    expect(mockDeleteIfUnreferenced).toHaveBeenCalledWith(ready.fileEntryId);
+    expect(mockDeleteEntry).toHaveBeenCalledWith(ready.fileEntryId);
     expect(mockCreateInternalEntry).not.toHaveBeenCalled();
   });
 
@@ -119,7 +131,7 @@ describe('useManagedComposerAttachments', () => {
     await act(async () => snapshot?.clearAttachments());
 
     expect(snapshot?.attachments).toEqual([]);
-    expect(mockDeleteIfUnreferenced).not.toHaveBeenCalled();
+    expect(mockDeleteEntry).not.toHaveBeenCalled();
   });
 
   it('imports transient initial attachments but mounts managed ones as ready', async () => {
@@ -136,6 +148,39 @@ describe('useManagedComposerAttachments', () => {
       { name: 'source.pdf', status: 'ready' },
       { name: 'ready.pdf', status: 'ready' },
     ]);
+  });
+
+  it('logs import duration without file identity or location', async () => {
+    const pending = deferred<ReturnType<typeof resolvedFile>>();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+    mockCreateInternalEntry.mockReturnValue(pending.promise);
+    await renderHook();
+
+    await act(async () => snapshot?.addAttachments([source('private.pdf')]));
+    now.mockReturnValue(1_830);
+    await act(async () => {
+      pending.resolve(resolvedFile('00000000-0000-7000-8000-000000000015', 'private.pdf'));
+      await pending.promise;
+    });
+
+    expect(mockLoggerDebug).toHaveBeenCalledWith('Attachment import finished', {
+      durationMs: 830,
+      kind: 'file',
+      result: 'ready',
+      size: 128,
+    });
+  });
+
+  it('rejects unsupported images before importing them', async () => {
+    await renderHook([imageSource('initial.heic', 'image/heic')]);
+
+    await act(async () => snapshot?.addAttachments([imageSource('file.avif', 'image/avif')]));
+
+    expect(snapshot?.attachments).toEqual([]);
+    expect(mockCreateInternalEntry).not.toHaveBeenCalled();
+    expect(mockAlertShow).toHaveBeenCalledWith({
+      title: 'chat.attachments.unsupportedImageFormat',
+    });
   });
 });
 
@@ -168,6 +213,16 @@ function source(name: string): ComposerAttachmentSource {
   };
 }
 
+function imageSource(name: string, mediaType: string): ComposerAttachmentSource {
+  return {
+    id: `image:${name}`,
+    kind: 'image',
+    mediaType,
+    name,
+    uri: `file:///source/${name}`,
+  };
+}
+
 function readyAttachment(entryId: FileEntryId, name: string): ComposerAttachmentReady {
   return {
     ...source(name),
@@ -180,15 +235,12 @@ function readyAttachment(entryId: FileEntryId, name: string): ComposerAttachment
 function resolvedFile(entryId: FileEntryId, name: string) {
   return {
     entry: {
-      cleanupPolicy: 'delete_when_unreferenced' as const,
-      contentHash: null,
-      createdAt: '2026-08-08T00:00:00.000Z',
-      ext: 'pdf',
+      createdAt: 1_754_611_200_000,
+      filename: name,
       id: entryId,
-      name,
-      origin: 'internal' as const,
+      mediaType: 'application/pdf',
       size: 128,
-      updatedAt: '2026-08-08T00:00:00.000Z',
+      updatedAt: 1_754_611_200_000,
     },
     uri: `file:///managed/${name}`,
   };

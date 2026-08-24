@@ -1,94 +1,73 @@
-import { Section } from '@cherrystudio/ui/components';
+import BellIcon from '@cherrystudio/app-icons/icons/bell';
+import CircleUserRoundIcon from '@cherrystudio/app-icons/icons/circle-user-round';
+import CloudIcon from '@cherrystudio/app-icons/icons/cloud';
+import GlobeIcon from '@cherrystudio/app-icons/icons/globe';
+import InfoIcon from '@cherrystudio/app-icons/icons/info';
+import LockIcon from '@cherrystudio/app-icons/icons/lock';
+import PaletteIcon from '@cherrystudio/app-icons/icons/palette';
+import SparklesIcon from '@cherrystudio/app-icons/icons/sparkles';
+import { Image, Section } from '@cherrystudio/ui/components';
 import { resolveProviderIcon } from '@cherrystudio/ui/icons';
 import { useRouter } from 'expo-router';
-import {
-  CircleUserRoundIcon,
-  CloudIcon,
-  DatabaseIcon,
-  EarthIcon,
-  InfoIcon,
-  ShieldCheckIcon,
-  SparklesIcon,
-  SunIcon,
-} from 'lucide-uniwind/png';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View } from 'react-native';
-import { useBottomTabBarHeight } from 'react-native-bottom-tabs';
-import Animated from 'react-native-reanimated';
+import { Platform, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUniwind } from 'uniwind';
 
-import { Image } from '@/frontend/components/nativePrimitives';
+import { RouteHeader } from '@/frontend/components/headers';
 import { usePreference } from '@/frontend/data/hooks';
 
-import { ProfileHero, ProfileStickyBar, useProfileHeaderAnimation } from './profileHero';
+import { ProfileHero } from './profileHero';
 
 export default function SettingsScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme } = useUniwind();
-  const tabBarHeight = useBottomTabBarHeight();
   const [userName] = usePreference('app.user.name');
-  const { lockProgress, onScroll, scrollY, toggleHeroLock } = useProfileHeaderAnimation();
   const mcpIcon = resolveProviderIcon('mcp')?.[theme === 'dark' ? 'dark' : 'light'];
 
   const openProfileSettings = useCallback(() => {
     router.push('/settings/profile');
   }, [router]);
 
-  // With no name set yet, the hero is a call to action: tapping it (avatar or the
-  // prompt) opens profile settings instead of toggling the expand/collapse lock.
-  const hasUserName = userName.trim().length > 0;
-  const onHeroPress = hasUserName ? toggleHeroLock : openProfileSettings;
-
-  // Own the insets explicitly: `never` keeps the scroll-offset zero point stable
-  // (so scrollY reads 0 at rest and negative on iOS overscroll), which the hero
-  // animation depends on. No top padding: the hero box is pinned to content y=0
-  // and draws under the status bar, exactly like the reference header.
-  const contentContainerStyle = useMemo(() => ({ paddingBottom: tabBarHeight }), [tabBarHeight]);
+  const contentContainerStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
 
   return (
     <View className="flex-1 bg-grouped-background">
-      <Animated.ScrollView
-        alwaysBounceVertical
+      <RouteHeader />
+      <ScrollView
+        alwaysBounceVertical={false}
         contentContainerStyle={contentContainerStyle}
-        contentInsetAdjustmentBehavior="never"
-        onScroll={onScroll}
-        scrollEventThrottle={16}
+        contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
       >
-        <ProfileHero
-          lockProgress={lockProgress}
-          onPress={onHeroPress}
-          scrollY={scrollY}
-          userName={userName}
-        />
-        <View className="gap-6 px-2 pt-6">
+        <ProfileHero onPress={openProfileSettings} userName={userName} />
+        <View className="gap-6 px-2 pt-2">
           <Section>
             <Section.Item
               label={t('settings.items.profile')}
-              leading={<CircleUserRoundIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<CircleUserRoundIcon className="size-5 text-foreground" />}
               onPress={openProfileSettings}
             />
           </Section>
           <Section>
             <Section.Item
               label={t('settings.items.modelService')}
-              leading={<CloudIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<CloudIcon className="size-5 text-foreground" />}
               onPress={() => router.push('/settings/provider')}
             />
             <Section.Item
               label={t('settings.items.defaultModel')}
-              leading={<SparklesIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<SparklesIcon className="size-5 text-foreground" />}
               onPress={() => router.push('/settings/model')}
             />
           </Section>
           <Section>
             <Section.Item
               label={t('settings.items.webSearch')}
-              leading={<EarthIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<GlobeIcon className="size-5 text-foreground" />}
               onPress={() => router.push('/settings/websearch')}
             />
             <Section.Item
@@ -107,34 +86,35 @@ export default function SettingsScreen() {
             />
           </Section>
           <Section>
-            <Section.Item
-              label={t('settings.items.dataBackup')}
-              leading={<DatabaseIcon className="size-5 text-foreground" strokeWidth={2} />}
-              onPress={() => router.push('/settings/data')}
-            />
+            {Platform.OS === 'ios' ? (
+              <Section.Item
+                label={t('settings.items.notifications')}
+                leading={<BellIcon className="size-5 text-foreground" />}
+                onPress={() => router.push('/settings/notifications')}
+              />
+            ) : null}
             <Section.Item
               label={t('settings.items.permissions')}
-              leading={<ShieldCheckIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<LockIcon className="size-5 text-foreground" />}
               onPress={() => router.push('/settings/permissions')}
             />
           </Section>
           <Section>
             <Section.Item
               label={t('settings.appearance.title')}
-              leading={<SunIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<PaletteIcon className="size-5 text-foreground" />}
               onPress={() => router.push('/settings/appearance')}
             />
           </Section>
           <Section>
             <Section.Item
               label={t('settings.items.aboutUs')}
-              leading={<InfoIcon className="size-5 text-foreground" strokeWidth={2} />}
+              leading={<InfoIcon className="size-5 text-foreground" />}
               onPress={() => router.push('/settings/about')}
             />
           </Section>
         </View>
-      </Animated.ScrollView>
-      <ProfileStickyBar scrollY={scrollY} topInset={insets.top} userName={userName} />
+      </ScrollView>
     </View>
   );
 }

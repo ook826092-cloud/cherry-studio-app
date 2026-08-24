@@ -1,8 +1,8 @@
-import type { Topic } from '@cherrystudio/universal/data/types/topic';
+import { useAlert } from '@cherrystudio/ui/components';
 import { useEffect } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
-import { useAlert } from '@/frontend/components/AlertProvider';
+import type { Topic } from '@/shared/data/types/topic';
 
 import { useTopicListActions } from '../../context/TopicListProvider';
 import { useTopicActionAlerts } from '../useTopicActionAlerts';
@@ -11,7 +11,7 @@ jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-jest.mock('@/frontend/components/AlertProvider', () => ({
+jest.mock('@cherrystudio/ui/components', () => ({
   useAlert: jest.fn(),
 }));
 
@@ -63,7 +63,6 @@ describe('useTopicActionAlerts', () => {
       deleteTopics: jest.fn(),
       loadMoreTopics: jest.fn(),
       renameTopic: mockRenameTopic,
-      toggleTopicPin: jest.fn(),
     });
 
     await act(async () => {

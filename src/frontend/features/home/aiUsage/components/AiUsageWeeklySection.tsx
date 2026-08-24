@@ -1,3 +1,4 @@
+import { Button, Section } from '@cherrystudio/ui/components';
 import {
   LegendList,
   type LegendListRef,
@@ -7,8 +8,6 @@ import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { type NativeScrollEvent, type NativeSyntheticEvent, StyleSheet, View } from 'react-native';
 
-import { Section } from '@/frontend/components/Section';
-
 import {
   type AiUsageWeekTimelineResult,
   useAiUsageWeekTimeline,
@@ -16,7 +15,6 @@ import {
 import { useMeasuredWidth } from '../hooks/useMeasuredWidth';
 import type { AiUsageDetailPage } from '../types';
 import { AI_USAGE_CURRENT_WEEK_PAGE_INDEX } from '../utils/aiUsageDetail';
-import { AiUsageSectionAction } from './AiUsageSectionState';
 import { AiUsageWeekChartPage } from './AiUsageWeekChartPage';
 
 const ADJACENT_PAGE_DISTANCE = 1;
@@ -144,20 +142,21 @@ export function AiUsageWeeklySection({
   );
 
   return (
-    <Section
-      action={
-        activePageIndex === AI_USAGE_CURRENT_WEEK_PAGE_INDEX ? undefined : (
-          <AiUsageSectionAction
-            label={t('aiUsage.showThisWeek')}
+    <Section testID="ai-usage-week-section">
+      <Section.Header title={t('aiUsage.tokenUsage')}>
+        {activePageIndex === AI_USAGE_CURRENT_WEEK_PAGE_INDEX ? undefined : (
+          <Button
+            className="py-0"
+            hitSlop={10}
+            size="xs"
             testID="ai-usage-show-current-week"
-            variant="compact"
+            variant="ghost"
             onPress={handleShowCurrentWeek}
-          />
-        )
-      }
-      testID="ai-usage-week-section"
-      title={t('aiUsage.tokenUsage')}
-    >
+          >
+            <Button.Label numberOfLines={1}>{t('aiUsage.showThisWeek')}</Button.Label>
+          </Button>
+        )}
+      </Section.Header>
       <View className="p-4">
         <View ref={viewportRef} testID="ai-usage-week-viewport" onLayout={onLayout}>
           {pageWidth > 0 ? (

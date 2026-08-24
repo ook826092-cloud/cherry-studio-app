@@ -19,12 +19,6 @@ import {
   splitImageParamValues,
 } from '@cherrystudio/ai-runtime/utils';
 import type { ImageGenerationMode, ParamValues } from '@cherrystudio/provider-registry';
-import type { ServingCredentialReceipt } from '@cherrystudio/universal/data/types/aiUsageRecord';
-import type { Assistant } from '@cherrystudio/universal/data/types/assistant';
-import type { FileEntryId } from '@cherrystudio/universal/data/types/file';
-import type { Model } from '@cherrystudio/universal/data/types/model';
-import { parseUniqueModelId } from '@cherrystudio/universal/data/types/model';
-import type { Provider } from '@cherrystudio/universal/data/types/provider';
 import { type LanguageModelUsage, type ModelMessage, type UIMessageChunk } from 'ai';
 import { fetch as expoFetch } from 'expo/fetch';
 
@@ -44,8 +38,13 @@ import {
 } from '@/backend/data/services/ProviderRegistryService';
 import { providerService, type ProviderService } from '@/backend/data/services/ProviderService';
 import { fileContent } from '@/backend/services/file/fileContent';
-import { COPILOT_PROVIDER_ID } from '@/backend/services/oauth/authorization/adapters/CopilotOAuthAdapter';
 import { devicePermissions } from '@/backend/services/permissions';
+import type { ServingCredentialReceipt } from '@/shared/data/types/aiUsageRecord';
+import type { Assistant } from '@/shared/data/types/assistant';
+import type { FileEntryId } from '@/shared/data/types/file';
+import type { Model } from '@/shared/data/types/model';
+import { parseUniqueModelId } from '@/shared/data/types/model';
+import type { Provider } from '@/shared/data/types/provider';
 
 import { createAiUsagePlugin } from './hooks/billingHook';
 import { resolveUIMessageFileUrls } from './messages/attachmentRouting';
@@ -181,32 +180,14 @@ function createProviderCallHandler(
 }
 
 /**
- * The two OAuth calls the AI runtime makes, bound to the installed host.
- *
- * Both services are resolved per call rather than captured, so a host
- * replacement cannot leave this port serving a dead generation. The Copilot id
- * lives here, with the consumer that needs a serving token, rather than in the
- * OAuth module — its README keeps the generic runtime and public contract free
- * of provider names.
- */
-const hostOAuth: AiServiceDependencies['oauth'] = {
-  authenticatedFetch: (providerId, buildRequest, doFetch, options) =>
-    application
-      .get('OAuthRuntimeService')
-      .authenticatedFetch(providerId, buildRequest, doFetch, options),
-  getCopilotServingToken: (headers, signal) =>
-    application.get('ProviderOAuthService').getServingToken(COPILOT_PROVIDER_ID, headers, signal),
-};
-
-/**
  * Lifecycle AI service. See `docs/references/ai/core-architecture.md` in desktop.
  *
  * Mobile keeps the desktop service name but does not register IPC handlers
  * or depend on Electron main-process lifecycle services.
  *
  * It declares no `@DependsOn`. Its container-owned collaborators —
- * `PreferenceService`, `WebSearchService`, `McpRuntimeService`,
- * `OAuthRuntimeService`, `ProviderOAuthService` — are resolved inside methods
+ * `PreferenceService`, `WebSearchService`, `McpRuntimeService` — are resolved
+ * inside methods
  * instead, because the single optional dependencies object is what every AI test
  * injects through and positional injection would take that argument slot. The
  * cost is that those edges do not appear in the graph; it is affordable because
@@ -236,7 +217,6 @@ export class AiService extends BaseService {
       assistant: overrides.assistant ?? assistantService,
       fileContent: overrides.fileContent ?? fileContent,
       model: overrides.model ?? modelService,
-      oauth: overrides.oauth ?? hostOAuth,
       preference: overrides.preference ?? application.get('PreferenceService'),
       provider: overrides.provider ?? providerService,
       providerRegistry: overrides.providerRegistry ?? providerRegistryService,
@@ -404,8 +384,6 @@ export class AiService extends BaseService {
       {
         getAuthConfig: async (providerId) =>
           (await this.services.provider.getAuthConfig(providerId)) ?? undefined,
-        getCopilotToken: (headers, signal) =>
-          this.services.oauth.getCopilotServingToken(headers, signal),
         getRotatedApiKey: (providerId) => this.services.provider.getRotatedApiKey(providerId),
         getVertexAuthHeaders: (input) => this.services.vertexAuth.getAuthorizationHeaders(input),
       },

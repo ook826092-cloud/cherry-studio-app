@@ -1,16 +1,16 @@
 # Extending Cherry Mobile
 
 This is a placement guide for extending the in-process frontend/backend architecture. Prefer an
-existing deep module over a new registry or pass-through wrapper. Read the
-[Architecture Overview](../references/architecture-overview.md) and [Data Layer](../references/data/README.md)
-before introducing a new cross-layer interface.
+existing deep module over a new registry or pass-through wrapper. Read
+[Code Organization](../references/code-organization.md), the
+[Architecture Overview](../references/architecture-overview.md), and
+[Data Layer](../references/data/README.md) before introducing a new cross-layer interface.
 
 ## Add A Resource Endpoint
 
-1. Put entities and DTO schemas in `packages/universal/src/data` (`@cherrystudio/universal/data`) when
-   both sides need them; this package mirrors desktop `src/shared`, so keep additions
-   desktop-compatible.
-2. Define the endpoint under `packages/universal/src/data/api/schemas` and add it to `apiSchemas.ts`.
+1. Put entities and DTO schemas in `src/shared/data` (`@/shared/data`) when both sides need them;
+   the data layer is mobile-owned, so add only what mobile code reads.
+2. Define the endpoint under `src/shared/data/api/schemas` and add it to `apiSchemas.ts`.
 3. Implement simple persistence directly in `src/backend/data/services`.
 4. Add an endpoint-family handler under `src/backend/data/api/handlers` and register it in
    `apiHandlers.ts`.
@@ -39,19 +39,20 @@ workflow interface and observable results.
 
 - Add Drizzle schemas under `src/backend/data/db/schemas` and register them in its barrel.
 - Generate and bundle the migration under `src/backend/data/db`.
-- Keep Drizzle row types backend-only; expose entities/DTOs from `@cherrystudio/universal/data`.
+- Keep Drizzle row types backend-only; expose entities/DTOs from `@/shared/data`.
 - Expose frontend access through a Data API endpoint, not a new `Backend` module.
 - Keep resource-specific composition in the owning frontend hook or feature, not in shared or
   backend code.
 
-New Message Part vocabulary belongs in `packages/universal/src/data/types/uiParts.ts`; render dispatch belongs in
-`src/frontend/components/messagePresentation/messageContent`. A new JSON part does not require a table migration, but
-FTS indexes only text parts.
+New Message Part vocabulary belongs in `packages/universal/src/data/types/uiParts.ts` (the
+transitional home of the entity types `packages/ai-runtime` imports); render
+dispatch belongs in `src/frontend/components/messages/parts/MessagePartRenderer.tsx`. A new JSON
+part does not require a table migration, but FTS indexes only text parts.
 
 ## Add AI Or Backend Service Behavior
 
 AI SDK adapters live under `src/backend/ai`. Device and third-party capabilities live in their
-owning domain under `src/backend/services`, such as `permissions`, `oauth`, and `webSearch`.
+owning domain under `src/backend/services`, such as `permissions`, `models`, and `webSearch`.
 Cross-layer AI tool and transport rules belong in `packages/universal/src/ai`
 (`@cherrystudio/universal/ai`). General pure helpers used by both sides belong in `src/shared/utils`
 when they are mobile-native, or in `packages/universal/src/utils` when they mirror a desktop helper,
@@ -60,7 +61,7 @@ including model capability checks.
 Keep a direct Cherry Desktop service counterpart's `Service` name and public methods. Name
 mobile-only owners by role: `Module`, `Runtime`, `Session`, `Client`, `Adapter`, or `Manager`; never
 add an `Impl` suffix or a forwarding `Service` wrapper. See
-[Naming Conventions](../references/naming-conventions.md#52-architectural-role-names).
+[Runtime Ownership](../references/runtime-ownership.md#role-names).
 
 App-level tools are resolved by `ToolResolver` and attached in
 `src/backend/ai/runtime/aiSdk/params/buildAgentParams.ts`. Provider plugins are

@@ -1,10 +1,5 @@
-import {
-  ListChecksIcon,
-  PauseIcon,
-  PlayIcon,
-  RefreshCcwIcon,
-  Trash2Icon,
-} from 'lucide-uniwind/png';
+import ListChecksIcon from '@cherrystudio/app-icons/icons/list-checks';
+import RefreshCcwIcon from '@cherrystudio/app-icons/icons/refresh-ccw';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,20 +8,12 @@ import type { ProviderDetailChromeProps } from './ProviderDetailChrome.types';
 import { PullSpinner } from './PullSpinner';
 
 export function ProviderDetailChrome({
-  canDelete,
   editAction,
-  isActive,
-  isDisabled,
-  onDelete,
-  onToggleActive,
   pullAction,
   selection,
 }: ProviderDetailChromeProps) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const toggleLabel = t(
-    isActive ? 'settings.provider.disableProvider' : 'settings.provider.enableProvider',
-  );
   const selectAllLabel = t(
     selection?.isAllSelected
       ? 'settings.provider.models.selection.deselectAll'
@@ -56,6 +43,12 @@ export function ProviderDetailChrome({
     );
   }
 
+  // Nothing to put in the bar: the configuration tab's own actions are the
+  // switch in the banner and the delete button on the settings screen.
+  if (!pullAction && !editAction) {
+    return null;
+  }
+
   return (
     <View
       pointerEvents="box-none"
@@ -64,21 +57,6 @@ export function ProviderDetailChrome({
       <View className="bg-background/85" pointerEvents="none" style={styles.backdrop} />
       <View className="flex-row items-center">
         <View className="flex-row overflow-hidden rounded-full border border-border bg-field android:shadow-lg">
-          <Pressable
-            accessibilityLabel={toggleLabel}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: isDisabled, selected: isActive }}
-            className="size-12 items-center justify-center active:opacity-60 disabled:opacity-35"
-            disabled={isDisabled}
-            onPress={onToggleActive}
-          >
-            {isActive ? (
-              <PauseIcon className="size-5 text-foreground" strokeWidth={2} />
-            ) : (
-              <PlayIcon className="size-5 text-primary" strokeWidth={2} />
-            )}
-          </Pressable>
-
           {pullAction ? (
             <Pressable
               accessibilityLabel={t('settings.provider.models.pull')}
@@ -87,14 +65,14 @@ export function ProviderDetailChrome({
                 busy: pullAction.isLoading,
                 disabled: pullAction.isDisabled || pullAction.isLoading,
               }}
-              className="size-12 items-center justify-center border-border border-l active:opacity-60 disabled:opacity-35"
+              className="size-12 items-center justify-center active:opacity-60 disabled:opacity-35"
               disabled={pullAction.isDisabled || pullAction.isLoading}
               onPress={pullAction.onPress}
             >
               {pullAction.isLoading ? (
                 <PullSpinner className="size-5 text-foreground" />
               ) : (
-                <RefreshCcwIcon className="size-5 text-foreground" strokeWidth={2} />
+                <RefreshCcwIcon className="size-5 text-foreground" />
               )}
             </Pressable>
           ) : null}
@@ -104,24 +82,13 @@ export function ProviderDetailChrome({
               accessibilityLabel={t('settings.provider.models.selection.start')}
               accessibilityRole="button"
               accessibilityState={{ disabled: editAction.isDisabled }}
-              className="size-12 items-center justify-center border-border border-l active:opacity-60 disabled:opacity-35"
+              // The divider belongs to whatever follows the first button, and
+              // which button is first now depends on the tab.
+              className={`size-12 items-center justify-center active:opacity-60 disabled:opacity-35 ${pullAction ? 'border-border border-l' : ''}`}
               disabled={editAction.isDisabled}
               onPress={editAction.onPress}
             >
-              <ListChecksIcon className="size-5 text-foreground" strokeWidth={2} />
-            </Pressable>
-          ) : null}
-
-          {canDelete ? (
-            <Pressable
-              accessibilityLabel={t('settings.provider.deleteProvider')}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: isDisabled }}
-              className="size-12 items-center justify-center border-border border-l active:opacity-60 disabled:opacity-35"
-              disabled={isDisabled}
-              onPress={onDelete}
-            >
-              <Trash2Icon className="size-5 text-destructive" strokeWidth={2} />
+              <ListChecksIcon className="size-5 text-foreground" />
             </Pressable>
           ) : null}
         </View>

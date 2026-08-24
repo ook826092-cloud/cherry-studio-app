@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, Text, View } from 'react-native';
 
-import { BackHeader } from '@/frontend/components/headers';
+import { RouteHeader } from '@/frontend/components/headers';
 import {
   MODEL_SETTING_KIND_TITLE_KEYS,
   MODEL_SETTING_KINDS,
@@ -13,12 +13,6 @@ import {
   useModelPickerData,
   useModelSettingSelections,
 } from '@/frontend/components/modelPicker';
-
-const MODEL_SETTING_ICONS = {
-  default: '⭐',
-  fast: '⚡',
-  translate: '🌐',
-} as const;
 
 export default function ModelSettingsScreen() {
   const { t } = useTranslation();
@@ -34,9 +28,6 @@ export default function ModelSettingsScreen() {
       MODEL_SETTING_KINDS.map((kind: ModelSettingKind) => ({
         key: kind,
         label: t(MODEL_SETTING_KIND_TITLE_KEYS[kind]),
-        leading: (
-          <Text className="min-w-5 text-center text-emoji-xl">{MODEL_SETTING_ICONS[kind]}</Text>
-        ),
         onPress: () => router.push(`/settings/model/${kind}`),
         showChevron: true,
         trailing: (
@@ -51,7 +42,7 @@ export default function ModelSettingsScreen() {
 
   return (
     <>
-      <BackHeader title={t('settings.pages.model.title')} />
+      <RouteHeader title={t('settings.pages.model.title')} />
       <ScrollView
         alwaysBounceVertical={false}
         className="flex-1"

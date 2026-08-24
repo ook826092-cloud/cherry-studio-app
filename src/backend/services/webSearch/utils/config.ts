@@ -1,23 +1,20 @@
-import type {
-  PreferenceDefaultScopeType,
-  PreferenceKeyType,
-  WebSearchCapability,
-  WebSearchProvider,
-  WebSearchProviderOverrides,
-} from '@cherrystudio/universal/data/preference';
+import type { PreferenceSchema, PreferenceKeyType } from '@/shared/data/preference';
 import {
   WEB_SEARCH_PROVIDER_PRESET_MAP,
   type WebSearchProviderPreset,
-} from '@cherrystudio/universal/data/presets/webSearchProviders';
-import type { WebSearchExecutionConfig } from '@cherrystudio/universal/data/types/webSearch';
-import { normalizeWebSearchCutoffLimit } from '@cherrystudio/universal/data/types/webSearch';
+} from '@/shared/data/presets/webSearchProviders';
+import type {
+  WebSearchCapability,
+  WebSearchProvider,
+  WebSearchProviderOverrides,
+  WebSearchExecutionConfig,
+} from '@/shared/data/types/webSearch';
+import { normalizeWebSearchCutoffLimit } from '@/shared/data/types/webSearch';
 
 import { WebSearchConfigError } from '../WebSearchConfigError';
 
 export interface WebSearchPreferenceReader {
-  get<K extends PreferenceKeyType>(
-    key: K,
-  ): PreferenceDefaultScopeType[K] | Promise<PreferenceDefaultScopeType[K]>;
+  get<K extends PreferenceKeyType>(key: K): PreferenceSchema[K] | Promise<PreferenceSchema[K]>;
 }
 
 const DEFAULT_PROVIDER_KEY_BY_CAPABILITY = {
@@ -86,16 +83,14 @@ export function mergeWebSearchProviderPreset(
 export async function getRuntimeConfig(
   preferences: WebSearchPreferenceReader,
 ): Promise<WebSearchExecutionConfig> {
-  const [maxResults, excludeDomains, method, cutoffLimit] = await Promise.all([
+  const [maxResults, method, cutoffLimit] = await Promise.all([
     preferences.get('chat.web_search.max_results'),
-    preferences.get('chat.web_search.exclude_domains'),
     preferences.get('chat.web_search.compression.method'),
     preferences.get('chat.web_search.compression.cutoff_limit'),
   ]);
 
   return {
     maxResults: Math.max(1, maxResults),
-    excludeDomains,
     compression: {
       method,
       cutoffLimit: normalizeWebSearchCutoffLimit(cutoffLimit),

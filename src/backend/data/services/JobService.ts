@@ -1,3 +1,9 @@
+import { loggerService } from '@logger';
+import { and, asc, count, desc, eq, inArray, lte, type SQL } from 'drizzle-orm';
+
+import { application } from '@/backend/core/application/Application';
+import type { Database } from '@/backend/data/db/DbService';
+import { type InsertJobRow, type JobRow, jobTable } from '@/backend/data/db/schemas/job';
 import {
   ACTIVE_JOB_STATUSES,
   type JobError,
@@ -5,13 +11,7 @@ import {
   type JobSnapshot,
   type JobStatus,
   TERMINAL_JOB_STATUSES,
-} from '@cherrystudio/universal/data/api/schemas/jobs';
-import { loggerService } from '@logger';
-import { and, asc, count, desc, eq, inArray, lte, type SQL } from 'drizzle-orm';
-
-import { application } from '@/backend/core/application/Application';
-import type { Database } from '@/backend/data/db/DbService';
-import { type InsertJobRow, type JobRow, jobTable } from '@/backend/data/db/schemas/job';
+} from '@/shared/data/api/schemas/jobs';
 
 import { timestampToISO } from './utils/rowMappers';
 
@@ -19,12 +19,16 @@ const logger = loggerService.withContext('JobService');
 
 export type TerminalJobStatus = Extract<JobStatus, 'cancelled' | 'completed' | 'failed'>;
 
+export type SetTerminalResult = {
+  snapshot: JobSnapshot | null;
+  updated: boolean;
+};
+
 export type JobListFilter = {
   limit?: number;
   offset?: number;
   parentId?: string;
   queue?: string;
-  scheduleId?: string;
   status?: JobStatus[];
   type?: string | string[];
 };
@@ -67,7 +71,6 @@ function rowToSnapshot(row: JobRow): JobSnapshot {
     parentId: row.parentId,
     priority: row.priority,
     queue: row.queue,
-    scheduleId: row.scheduleId,
     scheduledAt: timestampToISO(row.scheduledAt),
     startedAt: row.startedAt === null ? null : timestampToISO(row.startedAt),
     status: row.status as JobStatus,
@@ -94,7 +97,6 @@ export class JobService {
     if (Array.isArray(filter.type)) {
       if (filter.type.length) conditions.push(inArray(jobTable.type, filter.type));
     } else if (filter.type) conditions.push(eq(jobTable.type, filter.type));
-    if (filter.scheduleId) conditions.push(eq(jobTable.scheduleId, filter.scheduleId));
     if (filter.parentId) conditions.push(eq(jobTable.parentId, filter.parentId));
     let query = this.dbService
       .getDb()
@@ -174,7 +176,14 @@ export class JobService {
    * queue capacity in the runtime, so the select half lives here and the
    * guarded-update half in {@link claimPendingByIdTx}.
    */
-  async getEligiblePendingTx(tx: Database, now: number, limit: number): Promise<JobRow[]> {
+  async getEligiblePendingTx(
+    tx: Database,
+    now: number,
+    types: readonly string[],
+    limit: number,
+    offset = 0,
+  ): Promise<JobRow[]> {
+    if (types.length === 0) return [];
     return tx
       .select()
       .from(jobTable)
@@ -183,10 +192,12 @@ export class JobService {
           eq(jobTable.status, 'pending'),
           eq(jobTable.cancelRequested, false),
           lte(jobTable.scheduledAt, now),
+          inArray(jobTable.type, [...types]),
         ),
       )
       .orderBy(asc(jobTable.priority), asc(jobTable.scheduledAt), asc(jobTable.id))
-      .limit(limit);
+      .limit(limit)
+      .offset(offset);
   }
 
   /**
@@ -216,8 +227,8 @@ export class JobService {
   /**
    * Terminal write, fenced by `expectedStatuses` (mobile weak fence — desktop
    * updates by id alone because a stale finalizer cannot outlive its process
-   * there). Returns the number of rows updated; 0 means the fence held and the
-   * caller must not emit terminal side effects.
+   * there). Returns the transaction-consistent snapshot plus whether this call
+   * performed the update; `updated=false` means the fence held.
    */
   async setTerminalTx(
     tx: Database,
@@ -226,8 +237,8 @@ export class JobService {
     output: unknown | undefined,
     error: JobError | null,
     expectedStatuses: readonly JobStatus[],
-  ): Promise<number> {
-    const updated = await tx
+  ): Promise<SetTerminalResult> {
+    const [updated] = await tx
       .update(jobTable)
       .set({
         error,
@@ -236,8 +247,11 @@ export class JobService {
         status,
       })
       .where(and(eq(jobTable.id, id), inArray(jobTable.status, [...expectedStatuses])))
-      .returning({ id: jobTable.id });
-    return updated.length;
+      .returning();
+    if (updated) return { snapshot: rowToSnapshot(updated), updated: true };
+
+    const [current] = await tx.select().from(jobTable).where(eq(jobTable.id, id)).limit(1);
+    return { snapshot: current ? rowToSnapshot(current) : null, updated: false };
   }
 
   /**

@@ -1,8 +1,8 @@
 # Component Module Conventions
 
-This directory follows the repository-wide
-[naming conventions](../../../docs/references/naming-conventions.md). The notes below are the local
-conventions for `src/frontend/components`.
+This directory follows repository-wide [Code Organization](../../../docs/references/code-organization.md)
+and [Naming Conventions](../../../docs/references/naming-conventions.md). The notes below define only
+the local import boundary and concrete module shape for `src/frontend/components`.
 
 `src/frontend/components` is for independently owned modules shared across screens or feature
 domains. Route-owned UI should live under `src/frontend/features` until a second independent owner
@@ -14,7 +14,7 @@ actually consumes it.
 - Use lowercase plural bucket names only for categorical containers: `components`, `context`,
   `hooks`, `utils`.
 - Use `PascalCase` only when the directory itself is a component adapter or component family:
-  `BackHeader`, `CloseHeader`, `MainHeader`.
+  `RouteHeader`, `MainHeader`.
 - Avoid vague names such as `common`, `parts`, or `messages` when a domain name is available.
   Prefer names that say what the module owns.
 
@@ -56,8 +56,8 @@ Only add the subdirectories that the module actually needs.
 ## Reusable vs Feature-Owned
 
 - Count independent owners, not import statements. Reuse between `ChatScreen/input` and
-  `ChatScreen/workspace` is still owned by `ChatScreen`; structured message presentation moved to
-  `messagePresentation` only after painting became a second owner.
+  `ChatScreen/workspace` is still owned by `ChatScreen`; structured message rendering moved to
+  `messages` only after painting became a second owner.
 - Put UI or behavior in an independent module, such as `modelPicker`, when a second screen or
   component domain consumes it.
 - Keep feature-specific UI inside the owning module under `src/frontend/features`.

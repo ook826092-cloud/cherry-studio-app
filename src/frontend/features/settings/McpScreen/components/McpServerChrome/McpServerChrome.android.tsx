@@ -1,4 +1,6 @@
-import { PauseIcon, PlayIcon, Trash2Icon } from 'lucide-uniwind/png';
+import PauseIcon from '@cherrystudio/app-icons/icons/pause';
+import PlayIcon from '@cherrystudio/app-icons/icons/play';
+import Trash2Icon from '@cherrystudio/app-icons/icons/trash-2';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,14 +8,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { McpServerChromeProps } from './McpServerChrome.types';
 
 export function McpServerChrome({
-  isActive,
   isDisabled,
+  isEnabled,
   onDelete,
-  onToggleActive,
+  onToggleEnabled,
 }: McpServerChromeProps) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const toggleLabel = t(isActive ? 'settings.mcp.disableServer' : 'settings.mcp.enableServer');
+  const toggleLabel = t(isEnabled ? 'settings.mcp.disableServer' : 'settings.mcp.enableServer');
 
   return (
     <View
@@ -25,15 +27,15 @@ export function McpServerChrome({
         <Pressable
           accessibilityLabel={toggleLabel}
           accessibilityRole="button"
-          accessibilityState={{ disabled: isDisabled, selected: isActive }}
+          accessibilityState={{ disabled: isDisabled, selected: isEnabled }}
           className="size-12 items-center justify-center active:opacity-60 disabled:opacity-35"
           disabled={isDisabled}
-          onPress={onToggleActive}
+          onPress={onToggleEnabled}
         >
-          {isActive ? (
-            <PauseIcon className="size-5 text-foreground" strokeWidth={2} />
+          {isEnabled ? (
+            <PauseIcon className="size-5 text-foreground" />
           ) : (
-            <PlayIcon className="size-5 text-primary" strokeWidth={2} />
+            <PlayIcon className="size-5 text-foreground" />
           )}
         </Pressable>
 
@@ -45,7 +47,7 @@ export function McpServerChrome({
           disabled={isDisabled}
           onPress={onDelete}
         >
-          <Trash2Icon className="size-5 text-destructive" strokeWidth={2} />
+          <Trash2Icon className="size-5 text-destructive" />
         </Pressable>
       </View>
     </View>

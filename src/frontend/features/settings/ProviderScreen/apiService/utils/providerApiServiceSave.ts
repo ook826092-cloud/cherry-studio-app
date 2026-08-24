@@ -1,5 +1,5 @@
-import type { EndpointType } from '@cherrystudio/universal/data/types/model';
-import type { EndpointConfigs, Provider } from '@cherrystudio/universal/data/types/provider';
+import type { EndpointType } from '@/shared/data/types/model';
+import type { EndpointConfigs, Provider } from '@/shared/data/types/provider';
 
 import type { EndpointDraft } from './providerApiServiceEndpointDraft';
 import {
@@ -41,21 +41,28 @@ export function buildProviderPrimaryBaseUrlUpdates({
   provider: Provider;
 }): { defaultChatEndpoint: EndpointType; endpointConfigs: EndpointConfigs } {
   const trimmedBaseUrl = baseUrl.trim();
-  if (!isValidEndpointBaseUrl(trimmedBaseUrl)) {
+  if (trimmedBaseUrl && !isValidEndpointBaseUrl(trimmedBaseUrl)) {
     throw new ProviderApiServiceSaveError('invalid-base-url');
   }
 
   const primaryEndpoint = getPrimaryEndpoint(provider);
+  const endpointConfigs: EndpointConfigs = { ...provider.endpointConfigs };
+  const primaryConfig = { ...endpointConfigs[primaryEndpoint] };
+
+  if (trimmedBaseUrl) {
+    endpointConfigs[primaryEndpoint] = { ...primaryConfig, baseUrl: trimmedBaseUrl };
+  } else {
+    delete primaryConfig.baseUrl;
+    if (Object.keys(primaryConfig).length > 0) {
+      endpointConfigs[primaryEndpoint] = primaryConfig;
+    } else {
+      delete endpointConfigs[primaryEndpoint];
+    }
+  }
 
   return {
     defaultChatEndpoint: primaryEndpoint,
-    endpointConfigs: {
-      ...provider.endpointConfigs,
-      [primaryEndpoint]: {
-        ...provider.endpointConfigs?.[primaryEndpoint],
-        baseUrl: trimmedBaseUrl,
-      },
-    },
+    endpointConfigs,
   };
 }
 

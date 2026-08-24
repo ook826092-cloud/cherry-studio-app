@@ -1,4 +1,4 @@
-import { readCherryMeta } from '@cherrystudio/universal/data/types/uiParts';
+import { readCherryMeta } from '@/shared/data/types/uiParts';
 
 import {
   appendComposerAttachments,
@@ -11,6 +11,7 @@ import {
   createPhotoAttachmentDraft,
   hasComposerSendableContent,
   hasImportingComposerAttachments,
+  isComposerAttachmentSupported,
   isComposerAttachmentReady,
   isComposerImageFileName,
   isComposerImageMediaType,
@@ -107,7 +108,25 @@ describe('composer attachments', () => {
         name: 'photo.webp',
         uri: 'file://photo.webp',
       }),
-    ).toMatchObject({ kind: 'image', mediaType: 'image/*' });
+    ).toMatchObject({ kind: 'image', mediaType: 'image/webp' });
+  });
+
+  test('allows only model-supported image attachment formats', () => {
+    expect(
+      isComposerAttachmentSupported(
+        createPhotoAttachmentDraft({ fileName: 'photo.jpg', id: 'jpg', uri: 'file://photo.jpg' }),
+      ),
+    ).toBe(true);
+    expect(
+      isComposerAttachmentSupported(
+        createDocumentAttachmentDraft({
+          lastModified: 0,
+          mimeType: 'image/heic',
+          name: 'photo.heic',
+          uri: 'file://photo.heic',
+        }),
+      ),
+    ).toBe(false);
   });
 
   test('classifies non-image documents as file attachments', () => {
@@ -135,11 +154,12 @@ describe('composer attachments', () => {
 
     expect(parts).toHaveLength(2);
     expect(parts[0]).toEqual({ type: 'text', text: 'summarize this' });
+    // An imported attachment persists the entry-id sentinel, never a sandbox path.
     expect(parts[1]).toMatchObject({
       filename: 'file-a.pdf',
       mediaType: 'application/pdf',
       type: 'file',
-      url: 'file-a.pdf',
+      url: `cherry://file/${readyFileAttachment.fileEntryId}`,
     });
     expect(readCherryMeta(parts[1])).toEqual({
       fileEntryId: readyFileAttachment.fileEntryId,
