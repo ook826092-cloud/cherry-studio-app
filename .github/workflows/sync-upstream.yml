@@ -47,11 +47,10 @@ jobs:
         run: |
           git config --global user.name "${{ env.GIT_AUTHOR_NAME }}"
           git config --global user.email "${{ env.GIT_AUTHOR_EMAIL }}"
-          # 先暂存本地工作流文件
-          git checkout HEAD -- .github/workflows/
-          # 合并上游，接受所有变更
-          git merge upstream/v0.2 --no-edit
-          # 恢复本地工作流文件，排除上游覆盖
-          git checkout HEAD~1 -- .github/workflows/
+          # 合并上游全部代码变更（modify/delete 等冲突一律以上游为准，不会失败）
+          git merge upstream/v0.2 --no-edit --no-ff -X theirs
+          # merge 完成后把 .github/workflows/ 强制恢复为本地版本
+          # （本地已删除 pr-ci.yml 等上游 CI，防止上游 workflow 复活）
+          git checkout HEAD^ -- .github/workflows/
           git commit --amend --no-edit
           git push origin v0.2
