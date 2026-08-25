@@ -7,16 +7,21 @@ the mobile platform and application-service boundaries around that package.
 ## Backend Ownership
 
 - `AiService.ts` is the private backend AI entry point and preserves its existing app contract.
-- `agent/` owns the independent Agent Runtime contract, its FakeRuntime test double, and the
-  AI SDK Runtime implementation (`docs/references/agent/agent-runtime.md`). It must not import
+- `agent/` owns the independent Agent Runtime contract, its FakeRuntime test double, and the Pi
+  Runtime implementation (`docs/references/agent/agent-runtime.md`). This boundary must not import
   application protocol types, persistence, React, or Expo modules (ESLint-enforced).
 - `agentHost/` owns the Mobile Agent Host: the only adapter between the Agent Protocol
-  (`@/shared/contracts/agent`) and the Runtime contract, plus the Host-owned Runtime Router,
-  registry, Agent definition source, and the production `resolveModel` composition.
+  (`@/shared/contracts/agent`) and the Runtime contract, plus the Agent definition source and the
+  production Pi provider/model resolution adapter. Version 1 binds `local` directly to Pi without
+  a Runtime registry or implementation router.
 - `provider/` injects Expo environment values and app headers, then builds provider configuration
   from mobile data services.
-- `runtime/aiSdk/` retains Agent construction and request parameter orchestration that needs Expo
-  Crypto, preferences, provider services, tools, and logging.
+- `runtime/pi/` owns the current transitional Topic Chat bridge from Pi events to the existing
+  `UIMessageChunk` stream. It is text/reasoning-only and separate from the Pi Agent Runtime in
+  `agent/pi/`.
+- `runtime/aiSdk/` retains the current fallback Agent construction and request parameter
+  orchestration that needs Expo Crypto, preferences, provider services, tools, and logging. It is
+  not the target local Agent engine.
 - `streamManager/` owns chat lifecycle, persistence, topic naming, approval state, and snapshots.
 - `messages/` resolves managed and device-local attachments through Expo FileSystem.
 - `mcp/` owns the mobile Streamable HTTP transport, connection lifecycle, and runtime projection.
@@ -27,6 +32,14 @@ the mobile platform and application-service boundaries around that package.
 
 Pure message rules, provider implementations, request types, parameter policies, tool registry and
 meta-tools, loop plugins and observers, prompts, and stream helpers must not be duplicated here.
+
+## Pi-First Direction
+
+Pi is the sole target owner of local conversation state and the model/tool loop. The Mobile Agent
+Host owns Agent configuration, structured transcript persistence, permissions, approval policy, and
+the immutable tool snapshot injected for each turn. `tools: []` is ordinary conversation;
+configured tools are adapted from an application-owned contract into Pi tools. AI SDK may continue
+to serve non-Agent generation and provider utilities, but it must not become a parallel Chat Runtime.
 
 ## Sync Trust
 
