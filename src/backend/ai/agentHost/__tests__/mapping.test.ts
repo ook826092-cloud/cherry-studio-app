@@ -30,6 +30,50 @@ describe('Agent Host mappings', () => {
     ).toThrow('outside the turn resource ledger');
   });
 
+  test('projects resolved managed text as user content without persisting its body', () => {
+    const fileEntryId = '00000000-0000-7000-8000-000000000001';
+    const attachment = {
+      type: 'text-attachment' as const,
+      mediaType: 'text/plain',
+      name: 'notes.txt',
+      text: 'untrusted managed text envelope',
+      truncated: false,
+      trust: 'untrusted-user-content' as const,
+    };
+    const filePart = {
+      type: 'file' as const,
+      fileEntryId,
+      mediaType: 'text/plain',
+      name: 'notes.txt',
+    };
+
+    expect(
+      toRuntimeInputParts(
+        [filePart],
+        { fileEntryIds: new Set([fileEntryId]) },
+        new Map([[fileEntryId, attachment]]),
+      ),
+    ).toEqual([attachment]);
+
+    const message: AgentMessageView = {
+      id: 'user-message',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      role: 'user',
+      status: 'success',
+      parts: [{ ...filePart, id: 'attachment-1', purpose: 'input-attachment' }],
+      usage: null,
+      modelId: null,
+      inferenceSnapshot: null,
+      createdAt: TIMESTAMP,
+      updatedAt: TIMESTAMP,
+    };
+    expect(toRuntimeHistory([message], new Map([[fileEntryId, attachment]]))).toEqual([
+      { turnId: 'turn-1', messages: [{ role: 'user', parts: [attachment] }] },
+    ]);
+    expect(JSON.stringify(message)).not.toContain(attachment.text);
+  });
+
   test('projects available historical input images and omits missing images and artifacts', () => {
     const availableId = '00000000-0000-7000-8000-000000000001';
     const missingId = '00000000-0000-7000-8000-000000000002';
@@ -57,6 +101,8 @@ describe('Agent Host mappings', () => {
           },
         ],
         usage: null,
+        modelId: null,
+        inferenceSnapshot: null,
         createdAt: TIMESTAMP,
         updatedAt: TIMESTAMP,
       },
@@ -76,6 +122,8 @@ describe('Agent Host mappings', () => {
           },
         ],
         usage: null,
+        modelId: null,
+        inferenceSnapshot: null,
         createdAt: TIMESTAMP,
         updatedAt: TIMESTAMP,
       },
@@ -161,6 +209,8 @@ describe('Agent Host mappings', () => {
       status: 'success',
       parts: [{ id: 'text-1', type: 'text', text: 'Answer.', state: 'done' }],
       usage: { inputTokens: 120, outputTokens: 8, totalTokens: 128 },
+      modelId: null,
+      inferenceSnapshot: null,
       createdAt: TIMESTAMP,
       updatedAt: TIMESTAMP,
     };
