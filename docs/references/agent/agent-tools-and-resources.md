@@ -1,13 +1,13 @@
 # Agent Tools And Controlled Resources
 
-Status: **target design; application tool bindings and the Pi adapter are not yet complete**.
-Version 1 is local-only.
+Status: **tool binding persistence, Runtime tool contracts, the Pi adapter, HTTP MCP Runtime
+adaptation, and Host projection are implemented**. Version 1 is local-only.
 
-One capability is as-built ahead of that design: `write_file` (see
-[Managed File Read And Edit](#managed-file-read-and-edit)). It ships as a minimal slice — the Host
-injects a fixed catalog into every turn, so the `ToolRef` identity, the durable bindings, the turn
-resource ledger, and the `{ value, artifacts }` result envelope described below do not exist in
-code yet. Sections that a shipped tool already diverges from carry an **As-built** note.
+`write_file` (see [Managed File Read And Edit](#managed-file-read-and-edit)) ships as a minimal
+built-in slice using the settled `ToolRef` and `{ value, artifacts }` contracts. The Host combines
+its fixed application-owned catalog with persisted executable MCP bindings for each turn. The turn
+resource ledger does not exist yet. Sections that a shipped tool still diverges from carry an
+**As-built** note.
 
 This document defines how Cherry Mobile exposes application capabilities to Pi. Pi remains the
 sole conversation engine and owns the model → tool → result loop. Application services own every
@@ -60,9 +60,10 @@ digest, rejects collisions within the snapshot, and never falls back to display-
 Host snapshots a display name separately so historical UI remains understandable after
 configuration changes.
 
-**As-built.** Neither representation exists yet. `write_file` is identified by its wire name alone,
-and the Host builds the same one-tool catalog for every Agent, so there is nothing to bind and no
-alias to derive. The `agent` table therefore still has no tool-policy column.
+**As-built.** The turn-local representation exists: `write_file` has a stable built-in `ToolRef`
+and keeps `write_file` as its provider alias for compatibility. Durable bindings live in the
+normalized `agent_tool_binding` table, but the Host does not project them yet and builds the same
+one-tool catalog for every eligible Agent. The `agent` table therefore has no tool-policy column.
 
 The logical binding model is:
 
@@ -92,9 +93,19 @@ per `(agentId, serverId)`, and one specific binding per `(agentId, serverId, raw
 server or tool leaves a disabled/dangling binding for explicit user repair; it never retargets by
 display name.
 
-The physical SQLite shape lands with Agent CRUD integration. That is an implementation gap, not an
-open ownership question: bindings belong to Cherry persistence, the Host resolves them, and Pi must
-never read them directly.
+The physical SQLite shape and typed Data API are implemented in `agent_tool_binding`. MCP server
+ids intentionally have no foreign key: deleting a server disables its rows without erasing their
+stable identity, display snapshot, or approval. Upsert and replace preserve the row id for a stable
+identity, reject duplicates atomically, and cannot create authorization for a missing server unless
+that exact dangling identity already exists. Bindings belong to Cherry persistence, the Host
+resolves them, and Pi must never read them directly.
+
+The data resolver chooses a specific tool row before its server default, then combines that policy
+with the current stored Server state and caller-supplied discovery fact. It reports `unbound`,
+`binding-disabled`, `server-unavailable`, or `tool-unavailable` instead of silently falling back.
+A temporarily undiscovered tool keeps its stored `enabled` value; only its effective result is
+unavailable. This resolver returns configuration facts only and does not create or inject a Runtime
+tool.
 
 ## Snapshot Resolution
 
@@ -169,11 +180,10 @@ display metadata. Its content is not automatically projected as a model attachme
 history. If the managed entry still exists, a user may explicitly attach it again or the model may
 read it through a controlled tool; otherwise the reference remains visible as unavailable.
 
-**As-built.** `RuntimeTool.execute` still returns bare JSON, so there is no envelope and no
-artifact projection. `write_file` reports its new entry as a `fileEntryId` inside that JSON, which
-the transcript persists with the tool call; chat renders it as the same file card an attachment
-gets, resolved from the id at read time. Nothing is stored as a `purpose: 'artifact'` file part,
-and later turns see the id as ordinary result data.
+**As-built.** `write_file` returns its status and new `fileEntryId` under `value`, plus the created
+managed entry under `artifacts`. Pi projects that artifact as a `purpose: 'artifact'` file part, and
+the Host persists both the result envelope and file part. There is no resource ledger yet because
+the shipped catalog contains no tool that can read the resulting managed id.
 
 If a capability delegates work to `JobRuntime`, its Runtime tool still waits for a terminal result
 or cancellation during Version 1. A route unmount does not cancel it, but process death interrupts
@@ -269,9 +279,13 @@ with its own approval policy.
   transport data unchanged; only `streamableHttp` projects into the mobile Runtime.
 - `McpRuntimeService` owns clients, discovery caches, connection disposal, credentials, and wire
   errors. Pi receives sanitized tool definitions and callbacks, never MCP configuration secrets.
+- Discovery retains every paginated raw tool name and plain JSON Schema. Selected descriptors are
+  adapted with deterministic ref-derived aliases, schema revalidation, a 60-second call bound, and
+  a 256 KiB JSON result projection; remote payloads stay under `value` with `artifacts: []`.
 - The Host freezes the discovered tools for the turn. A reconnect may refresh the next snapshot but
   cannot silently replace the active catalog.
-- Third-party MCP tools default to `ask` until the user chooses a narrower per-tool policy.
+- Third-party MCP tools execute only with per-call `ask` approval in this version. An explicit
+  `deny` remains denied, while any legacy `auto` row is downgraded to `ask` during projection.
 
 ### System Calendar
 
@@ -337,6 +351,10 @@ Every callback receives the turn `AbortSignal`, applies a capability-specific ti
 credentials and private payloads from errors, and returns portable values. Cancellation propagates
 through MCP, provider, device, and file operations where their APIs support it; non-abortable native
 work must discard late results after the turn is terminal.
+
+Pi caps each turn at eight tool-loop steps, sixteen requested tool calls, and ten minutes. The MCP
+adapter separately caps each remote call at 60 seconds and projects at most 256 KiB of JSON. These
+limits are application constants rather than user settings in Version 1.
 
 ## Desktop Relationship
 

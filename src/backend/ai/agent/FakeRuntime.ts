@@ -14,6 +14,7 @@
  */
 
 import { RuntimeEventChannel } from './RuntimeEventChannel';
+import { createInterruptedToolResult } from './toolResults';
 import type {
   AgentRuntime,
   AgentRuntimeSession,
@@ -22,6 +23,9 @@ import type {
   RuntimeError,
   RuntimeEvent,
   RuntimeExecutionRequest,
+  RuntimeModel,
+  RuntimeModelPreflight,
+  RuntimeOutputPart,
 } from './types';
 
 /**
@@ -118,8 +122,8 @@ function validateRequest(
   }
   if (!capabilities.attachments) {
     const inputHasFile = request.input.some((part) => part.type === 'file');
-    const historyHasFile = request.history.some((message) =>
-      message.parts.some((part) => part.type === 'file'),
+    const historyHasFile = request.history.some((turn) =>
+      turn.messages.some((message) => message.parts.some((part) => part.type === 'file')),
     );
     if (inputHasFile || historyHasFile) {
       return {
@@ -142,6 +146,7 @@ type ActiveTurn = {
   channel: RuntimeEventChannel;
   abortController: AbortController;
   approvalWaiters: Map<string, ApprovalWaiter>;
+  toolParts: Map<string, Extract<RuntimeOutputPart, { type: 'tool' }>>;
   terminated: boolean;
 };
 
@@ -177,6 +182,7 @@ class FakeRuntimeSession implements AgentRuntimeSession {
       channel,
       abortController: new AbortController(),
       approvalWaiters: new Map(),
+      toolParts: new Map(),
       terminated: false,
     };
     this.activeTurn = turn;
@@ -251,6 +257,14 @@ class FakeRuntimeSession implements AgentRuntimeSession {
     if (turn.terminated) {
       return; // no output may follow a terminal event
     }
+    if (isTerminal(event)) {
+      this.interruptUnsettledToolParts(turn);
+    } else if (
+      (event.type === 'part.add' || event.type === 'part.replace') &&
+      event.part.type === 'tool'
+    ) {
+      turn.toolParts.set(event.part.toolCallId, event.part);
+    }
     turn.channel.push(event);
     if (isTerminal(event)) {
       turn.terminated = true;
@@ -259,6 +273,27 @@ class FakeRuntimeSession implements AgentRuntimeSession {
       if (this.activeTurn === turn) {
         this.activeTurn = undefined;
       }
+    }
+  }
+
+  private interruptUnsettledToolParts(turn: ActiveTurn): void {
+    for (const part of turn.toolParts.values()) {
+      if (
+        part.state === 'output-available' ||
+        part.state === 'denied' ||
+        part.state === 'error' ||
+        part.state === 'interrupted'
+      ) {
+        continue;
+      }
+      const { approvalId: _approvalId, error: _error, output: _output, ...base } = part;
+      const interrupted: Extract<RuntimeOutputPart, { type: 'tool' }> = {
+        ...base,
+        state: 'interrupted',
+        output: createInterruptedToolResult('The turn ended before this tool call completed.'),
+      };
+      turn.toolParts.set(part.toolCallId, interrupted);
+      turn.channel.push({ type: 'part.replace', part: interrupted });
     }
   }
 
@@ -286,14 +321,29 @@ const defaultProgram: FakeRuntimeProgram = (controller) => {
 
 export type FakeRuntimeOptions = {
   descriptor?: RuntimeDescriptor;
+  modelPreflight?: RuntimeModelPreflight;
 };
 
 export class FakeRuntime implements AgentRuntime {
   readonly descriptor: RuntimeDescriptor;
   private readonly programs: FakeRuntimeProgram[] = [];
+  private readonly modelPreflight: RuntimeModelPreflight;
 
   constructor(options: FakeRuntimeOptions = {}) {
     this.descriptor = options.descriptor ?? DEFAULT_DESCRIPTOR;
+    this.modelPreflight =
+      options.modelPreflight ??
+      createDefaultModelPreflight(
+        this.descriptor.capabilities.attachments,
+        this.descriptor.capabilities.tools,
+      );
+  }
+
+  async preflightModel(_model: RuntimeModel): Promise<RuntimeModelPreflight> {
+    return {
+      ...this.modelPreflight,
+      inputModalities: [...this.modelPreflight.inputModalities],
+    };
   }
 
   /** Enqueue a program consumed by the next `execute()` call, FIFO. */
@@ -320,4 +370,17 @@ export class FakeRuntime implements AgentRuntime {
     // between executes, and each execute dequeues the next one.
     return new FakeRuntimeSession(this.descriptor.capabilities, this.programs);
   }
+}
+
+function createDefaultModelPreflight(
+  supportsImages: boolean,
+  supportsTools: boolean,
+): RuntimeModelPreflight {
+  return {
+    contextWindow: 128_000,
+    inputModalities: supportsImages ? ['text', 'image'] : ['text'],
+    maxInputTokens: 120_000,
+    maxOutputTokens: 8_000,
+    supportsTools,
+  };
 }

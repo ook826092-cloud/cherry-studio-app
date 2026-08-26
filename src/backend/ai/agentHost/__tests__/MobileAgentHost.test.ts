@@ -19,14 +19,21 @@ import {
   type AgentEvent,
   type AgentSessionView,
 } from '@/shared/contracts/agent';
+import { createUniqueModelId } from '@/shared/data/types/model';
 
 import type { AgentDefinitionSource } from '../agentDefinitions';
 import type { AgentSessionNaming } from '../AgentSessionNaming';
+import { MAX_RUNTIME_CONTEXT_CHECKPOINT_BYTES } from '../contextCheckpoints';
 import { InMemoryAgentSessionStore } from '../InMemoryAgentSessionStore';
+import type { ManagedFileResolver } from '../managedFileResolver';
 import { MobileAgentHost } from '../MobileAgentHost';
 import type { AgentToolSource } from '../tools/builtInToolSource';
 
 const AGENT_ID = 'agent-under-test';
+const FILE_ENTRY_ID = '00000000-0000-7000-8000-000000000001';
+const TOOL_REF = { source: 'mcp', serverId: 'server-1', rawToolName: 'delete_file' } as const;
+const TOOL_PROVIDER_NAME = 'mcp_server_1_delete_file_a1b2';
+const TOOL_DISPLAY_NAME = 'Delete file';
 
 const USAGE_CONTEXT: RuntimeUsageContext = {
   credentialReceipt: { attribution: 'unknown' },
@@ -57,7 +64,7 @@ const agents: AgentDefinitionSource = {
 const FAKE_DESCRIPTOR = {
   id: 'fake',
   name: 'Scripted Runtime',
-  capabilities: { reasoning: true, tools: true, approvals: true, attachments: false },
+  capabilities: { reasoning: true, tools: true, approvals: true, attachments: true },
 } as const;
 
 const unusedAiService = {} as AiService;
@@ -87,21 +94,44 @@ const usage = {
   record: jest.fn(),
 };
 
+const inferenceModel = async (model: { providerId: string; modelId: string }) => ({
+  uniqueModelId: createUniqueModelId(model.providerId, model.modelId),
+  providerId: model.providerId,
+  modelId: model.modelId,
+  apiModelId: `${model.modelId}-api`,
+  name: model.modelId === 'mock-model' ? 'Mock Model' : 'Override Model',
+});
+
+const noFiles: ManagedFileResolver = {
+  resolveAvailable: jest.fn(async () => new Map()),
+  readAsDataUrl: jest.fn(async () => undefined),
+};
+
 /** Keeps the suite off the production catalog, which reads the database. */
 const noOpTools: AgentToolSource = { getTools: async () => [] };
 
 const stubTool: RuntimeTool = {
-  name: 'stub_tool',
+  ref: { source: 'builtin', capabilityId: 'stub_tool' },
+  providerName: 'stub_tool',
+  displayName: 'Stub tool',
   description: 'Does nothing.',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   approval: 'auto',
-  execute: async () => ({ status: 'ok' }),
+  execute: async () => ({ value: { status: 'ok' }, artifacts: [] }),
+};
+
+type HostToolOverrides = {
+  modelSupportsTools?: () => Promise<boolean>;
+  resolveRuntimeTools?: () => Promise<RuntimeTool[]>;
 };
 
 function createHost(
   runtime: FakeRuntime,
   naming: NamingOverride = noOpNaming,
+  files: ManagedFileResolver = noFiles,
   tools: AgentToolSource = noOpTools,
+  resolveInferenceModel = inferenceModel,
+  toolOverrides: HostToolOverrides = {},
 ): MobileAgentHost {
   return new MobileAgentHost(
     store,
@@ -111,7 +141,13 @@ function createHost(
     runtime,
     {
       agents,
+      files,
+      inferenceModel: resolveInferenceModel,
+      modelSupportsTools: toolOverrides.modelSupportsTools ?? (async () => true),
       naming,
+      runtimeTools: {
+        resolve: toolOverrides.resolveRuntimeTools ?? (async () => []),
+      },
       usage,
       tools,
     },
@@ -148,7 +184,7 @@ function hostWithText(
       controller.emit({ type: 'completed' });
     });
   }
-  return createHost(runtime, noOpNaming, options.tools);
+  return createHost(runtime, noOpNaming, noFiles, options.tools);
 }
 
 function createDeferred(): { promise: Promise<void>; resolve: () => void } {
@@ -211,7 +247,7 @@ describe('MobileAgentHost', () => {
       reasoning: true,
       tools: true,
       approvals: true,
-      attachments: false,
+      attachments: true,
     });
     expect(observation.snapshot.activeTurn).toBeNull();
 
@@ -238,6 +274,25 @@ describe('MobileAgentHost', () => {
     const finalized = events.find((event) => event.type === 'message.finalized');
     if (finalized?.type !== 'message.finalized') throw new Error('missing finalized message');
     expect(finalized.message.id).toBe(submitted.assistantMessageId);
+    expect(finalized.message).toMatchObject({
+      modelId: 'mock-provider::mock-model',
+      inferenceSnapshot: {
+        status: 'supported',
+        snapshot: {
+          version: 1,
+          model: {
+            uniqueModelId: 'mock-provider::mock-model',
+            providerId: 'mock-provider',
+            modelId: 'mock-model',
+            apiModelId: 'mock-model-api',
+            name: 'Mock Model',
+          },
+          reasoningEffort: 'low',
+          parameters: { maxOutputTokens: 512, temperature: 0.2 },
+          tools: [],
+        },
+      },
+    });
     expect(finalized.message.status).toBe('success');
     expect(finalized.message.parts).toEqual([
       { id: 'text-1', type: 'text', text: 'Hi', state: 'done' },
@@ -284,6 +339,7 @@ describe('MobileAgentHost', () => {
     expect(requests[0]).toMatchObject({
       instructions: 'Be brief.',
       history: [],
+      contextCheckpoint: null,
       input: [{ type: 'text', text: 'Hello.' }],
       model: { providerId: 'mock-provider', modelId: 'mock-model' },
       options: { maxOutputTokens: 512, reasoningEffort: 'low', temperature: 0.2 },
@@ -295,7 +351,192 @@ describe('MobileAgentHost', () => {
     expect(second.snapshot.activeTurn).toBeNull();
     await host.submitMessage({ sessionId: session.id, parts: [{ type: 'text', text: 'More.' }] });
     await waitFor(() => terminalTurnEvent(secondEvents) !== undefined, 'the second turn');
-    expect(requests[1]?.history.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(
+      requests[1]?.history.flatMap((turn) => turn.messages.map((message) => message.role)),
+    ).toEqual(['user', 'assistant']);
+  });
+
+  test('persists a completed checkpoint and replays it after Host recreation', async () => {
+    const checkpoint = {
+      version: 1 as const,
+      anchorTurnId: '',
+      payload: { summary: 'First turn summary.' },
+    };
+    const runtime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR })
+      .scriptEvents([{ type: 'completed' }])
+      .script((controller) => {
+        const anchorTurnId = controller.request.history[0]?.turnId;
+        if (!anchorTurnId) throw new Error('missing prior turn anchor');
+        checkpoint.anchorTurnId = anchorTurnId;
+        controller.emit({ type: 'context.checkpoint', checkpoint });
+        controller.emit({ type: 'completed' });
+      });
+    const host = createHost(runtime);
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    const events: AgentEvent[] = [];
+    await host.observeSession(session.id, (event) => events.push(event));
+    const completedCount = () =>
+      events.filter((event) => event.type === 'turn.updated' && event.turn.status === 'completed')
+        .length;
+
+    const first = await host.submitMessage({
+      sessionId: session.id,
+      parts: [{ type: 'text', text: 'First.' }],
+    });
+    await waitFor(() => completedCount() === 1, 'the first checkpoint turn');
+    const second = await host.submitMessage({
+      sessionId: session.id,
+      parts: [{ type: 'text', text: 'Second.' }],
+    });
+    await waitFor(() => completedCount() === 2, 'the checkpoint-producing turn');
+    expect(checkpoint.anchorTurnId).toBe(first.turnId);
+    expect(await store.getLatestContextCheckpoint(session.id)).toEqual({
+      assistantMessageId: second.assistantMessageId,
+      checkpoint,
+    });
+
+    const replayed: RuntimeExecutionRequest[] = [];
+    const restartedRuntime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR }).script(
+      (controller) => {
+        replayed.push(controller.request);
+        controller.emit({ type: 'completed' });
+      },
+    );
+    const restartedHost = createHost(restartedRuntime);
+    const restartedEvents: AgentEvent[] = [];
+    await restartedHost.observeSession(session.id, (event) => restartedEvents.push(event));
+    await restartedHost.submitMessage({
+      sessionId: session.id,
+      parts: [{ type: 'text', text: 'Third.' }],
+    });
+    await waitFor(
+      () => terminalTurnEvent(restartedEvents)?.turn.status === 'completed',
+      'the replayed turn',
+    );
+
+    expect(replayed[0]?.contextCheckpoint).toEqual(checkpoint);
+    expect(replayed[0]?.history.map((turn) => turn.turnId)).toEqual([second.turnId]);
+  });
+
+  test('does not persist checkpoints from failed or cancelled turns', async () => {
+    let anchorTurnId = '';
+    const runtime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR })
+      .script((controller) => {
+        anchorTurnId = controller.turnId;
+        controller.emit({ type: 'completed' });
+      })
+      .script((controller) => {
+        controller.emit({
+          type: 'context.checkpoint',
+          checkpoint: { version: 1, anchorTurnId, payload: { unsafe: 'failed' } },
+        });
+        controller.emit({
+          type: 'failed',
+          error: { code: 'runtime_error', message: 'failed', retryable: false },
+        });
+      })
+      .script((controller) => {
+        controller.emit({
+          type: 'context.checkpoint',
+          checkpoint: { version: 1, anchorTurnId, payload: { unsafe: 'cancelled' } },
+        });
+        controller.emit({ type: 'cancelled' });
+      });
+    const host = createHost(runtime);
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    const events: AgentEvent[] = [];
+    await host.observeSession(session.id, (event) => events.push(event));
+    const terminalCount = () =>
+      events.filter(
+        (event) =>
+          event.type === 'turn.updated' &&
+          ['completed', 'failed', 'cancelled'].includes(event.turn.status),
+      ).length;
+
+    for (const [index, text] of ['anchor', 'fail', 'cancel'].entries()) {
+      await host.submitMessage({ sessionId: session.id, parts: [{ type: 'text', text }] });
+      await waitFor(() => terminalCount() === index + 1, `${text} turn`);
+    }
+
+    expect(await store.getLatestContextCheckpoint(session.id)).toBeNull();
+  });
+
+  test('rejects an oversized checkpoint without truncating or failing the turn', async () => {
+    let anchorTurnId = '';
+    const runtime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR })
+      .script((controller) => {
+        anchorTurnId = controller.turnId;
+        controller.emit({ type: 'completed' });
+      })
+      .script((controller) => {
+        controller.emit({
+          type: 'context.checkpoint',
+          checkpoint: {
+            version: 1,
+            anchorTurnId,
+            payload: 'x'.repeat(MAX_RUNTIME_CONTEXT_CHECKPOINT_BYTES),
+          },
+        });
+        controller.emit({ type: 'completed' });
+      });
+    const host = createHost(runtime);
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    const events: AgentEvent[] = [];
+    await host.observeSession(session.id, (event) => events.push(event));
+    const completedCount = () =>
+      events.filter((event) => event.type === 'turn.updated' && event.turn.status === 'completed')
+        .length;
+
+    await host.submitMessage({ sessionId: session.id, parts: [{ type: 'text', text: 'one' }] });
+    await waitFor(() => completedCount() === 1, 'the anchor turn');
+    await host.submitMessage({ sessionId: session.id, parts: [{ type: 'text', text: 'two' }] });
+    await waitFor(() => completedCount() === 2, 'the oversized checkpoint turn');
+
+    expect(await store.getLatestContextCheckpoint(session.id)).toBeNull();
+    expect(events.at(-1)).toMatchObject({ type: 'turn.updated', turn: { status: 'completed' } });
+  });
+
+  test.each([
+    ['corrupt', 'not-json'],
+    ['unsupported version', { version: 2, anchorTurnId: 'turn-1', payload: {} }],
+    ['missing anchor', { version: 1, anchorTurnId: 'missing', payload: {} }],
+  ])('falls back to complete history for a %s persisted checkpoint', async (_name, checkpoint) => {
+    const requests: RuntimeExecutionRequest[] = [];
+    const host = hostWithText(['One', 'Two'], requests);
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    const events: AgentEvent[] = [];
+    await host.observeSession(session.id, (event) => events.push(event));
+    const completedCount = () =>
+      events.filter((event) => event.type === 'turn.updated' && event.turn.status === 'completed')
+        .length;
+
+    await host.submitMessage({ sessionId: session.id, parts: [{ type: 'text', text: 'First.' }] });
+    await waitFor(() => completedCount() === 1, 'the first turn');
+    jest.spyOn(store, 'getLatestContextCheckpoint').mockResolvedValueOnce({
+      assistantMessageId: 'checkpoint-row',
+      checkpoint,
+    });
+    await host.submitMessage({ sessionId: session.id, parts: [{ type: 'text', text: 'Second.' }] });
+    await waitFor(() => completedCount() === 2, 'the fallback turn');
+
+    expect(requests[1]?.contextCheckpoint).toBeNull();
+    expect(requests[1]?.history).toHaveLength(1);
+    expect(requests[1]?.history[0]?.messages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+    ]);
   });
 
   test('hands the turn the tools resolved for its model', async () => {
@@ -317,6 +558,19 @@ describe('MobileAgentHost', () => {
 
     expect(getTools).toHaveBeenCalledWith({ providerId: 'mock-provider', modelId: 'mock-model' });
     expect(requests[0]?.tools).toEqual([stubTool]);
+    expect((await store.listMessages(session.id))[1]?.inferenceSnapshot).toMatchObject({
+      status: 'supported',
+      snapshot: {
+        tools: [
+          {
+            ref: stubTool.ref,
+            providerName: stubTool.providerName,
+            displayName: stubTool.displayName,
+            approval: stubTool.approval,
+          },
+        ],
+      },
+    });
   });
 
   test('runs the turn tool-less when the catalog cannot be resolved', async () => {
@@ -412,6 +666,147 @@ describe('MobileAgentHost', () => {
       model: { modelId: 'mock-model', providerId: 'mock-provider' },
       options: { maxOutputTokens: 512, reasoningEffort: 'low', temperature: 0.2 },
     });
+
+    const assistantSnapshots = (await store.listMessages(session.id))
+      .filter((message) => message.role === 'assistant')
+      .map((message) => message.inferenceSnapshot);
+    expect(assistantSnapshots).toMatchObject([
+      {
+        status: 'supported',
+        snapshot: {
+          model: { uniqueModelId: 'override-provider::override-model' },
+          reasoningEffort: 'max',
+          parameters: { maxOutputTokens: 512, temperature: 0.2 },
+          tools: [],
+        },
+      },
+      {
+        status: 'supported',
+        snapshot: {
+          model: { uniqueModelId: 'mock-provider::mock-model' },
+          parameters: { maxOutputTokens: 512, temperature: 0.2 },
+          tools: [],
+        },
+      },
+      {
+        status: 'supported',
+        snapshot: {
+          model: { uniqueModelId: 'mock-provider::mock-model' },
+          reasoningEffort: 'low',
+          parameters: { maxOutputTokens: 512, temperature: 0.2 },
+          tools: [],
+        },
+      },
+    ]);
+  });
+
+  test('rejects an unavailable model before reserving transcript rows', async () => {
+    const runtime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR });
+    const host = createHost(runtime, noOpNaming, noFiles, noOpTools, async () => {
+      throw new Error('credential-secret from provider lookup');
+    });
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+
+    await expect(
+      host.submitMessage({
+        sessionId: session.id,
+        parts: [{ type: 'text', text: 'Do not reserve this.' }],
+      }),
+    ).rejects.toMatchObject({
+      view: {
+        code: 'EXECUTION_UNAVAILABLE',
+        message: 'The selected model is unavailable.',
+      },
+    });
+    await expect(store.listMessages(session.id)).resolves.toEqual([]);
+  });
+
+  test('freezes configured tools into Runtime input and the persisted inference snapshot', async () => {
+    const requests: RuntimeExecutionRequest[] = [];
+    const runtime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR }).script((controller) => {
+      requests.push(controller.request);
+      controller.emit({ type: 'completed' });
+    });
+    const tool: RuntimeTool = {
+      approval: 'ask',
+      description: 'Search a remote catalog.',
+      displayName: 'Search',
+      execute: async () => ({ artifacts: [], value: { found: true } }),
+      inputSchema: { type: 'object' },
+      providerName: 'mcp_search_abc1234',
+      ref: { source: 'mcp', serverId: 'server-1', rawToolName: 'search' },
+    };
+    let configuredTools = [tool];
+    const host = createHost(runtime, noOpNaming, noFiles, noOpTools, inferenceModel, {
+      resolveRuntimeTools: async () => configuredTools.slice(),
+    });
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    const events: AgentEvent[] = [];
+    await host.observeSession(session.id, (event) => events.push(event));
+
+    await host.submitMessage({
+      parts: [{ type: 'text', text: 'Search.' }],
+      sessionId: session.id,
+    });
+    configuredTools = [];
+    await waitFor(() => terminalTurnEvent(events) !== undefined, 'the tool snapshot turn');
+
+    expect(requests[0]?.tools).toEqual([tool]);
+    const transcript = await store.listMessages(session.id);
+    expect(transcript[1]?.inferenceSnapshot).toMatchObject({
+      status: 'supported',
+      snapshot: {
+        tools: [
+          {
+            approval: 'ask',
+            displayName: 'Search',
+            providerName: 'mcp_search_abc1234',
+            ref: tool.ref,
+          },
+        ],
+      },
+    });
+  });
+
+  test('rejects configured tools for an unsupported model before reserving messages', async () => {
+    const runtime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR });
+    const host = createHost(runtime, noOpNaming, noFiles, noOpTools, inferenceModel, {
+      modelSupportsTools: async () => false,
+      resolveRuntimeTools: async () => [
+        {
+          approval: 'ask',
+          description: 'Search.',
+          displayName: 'Search',
+          execute: async () => ({ artifacts: [], value: null }),
+          inputSchema: { type: 'object' },
+          providerName: 'mcp_search_abc1234',
+          ref: { source: 'mcp', serverId: 'server-1', rawToolName: 'search' },
+        },
+      ],
+    });
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+
+    await expect(
+      host.submitMessage({
+        parts: [{ type: 'text', text: 'Do not reserve this.' }],
+        sessionId: session.id,
+      }),
+    ).rejects.toMatchObject({
+      view: {
+        code: 'CAPABILITY_UNSUPPORTED',
+        message: 'The selected model does not support native tool calling.',
+      },
+    });
+    await expect(store.listMessages(session.id)).resolves.toEqual([]);
   });
 
   test('cancel settles the turn as cancelled and is idempotent', async () => {
@@ -567,6 +962,18 @@ describe('MobileAgentHost', () => {
     // restore after a process death.
     const session = await store.createSession({ agentId: AGENT_ID });
     const reserved = await store.reserveSubmission({
+      modelId: 'mock-provider::mock-model',
+      inferenceSnapshot: {
+        version: 1,
+        model: {
+          uniqueModelId: 'mock-provider::mock-model',
+          providerId: 'mock-provider',
+          modelId: 'mock-model',
+          name: 'Mock Model',
+        },
+        parameters: {},
+        tools: [],
+      },
       sessionId: session.id,
       userParts: [{ id: 'input-0', type: 'text', text: 'Hello.', state: 'done' }],
     });
@@ -729,9 +1136,11 @@ describe('MobileAgentHost', () => {
           id: 'tool-0',
           type: 'tool',
           toolCallId: 'call-1',
-          toolName: 'delete_file',
+          toolRef: TOOL_REF,
+          providerName: TOOL_PROVIDER_NAME,
+          displayName: TOOL_DISPLAY_NAME,
           state: 'awaiting-approval',
-          input: { path: '/tmp/x' },
+          input: { fileEntryId: 'file-1' },
           approvalId,
         },
       });
@@ -741,8 +1150,9 @@ describe('MobileAgentHost', () => {
           id: approvalId,
           turnId: controller.turnId,
           toolCallId: 'call-1',
-          toolName: 'delete_file',
-          input: { path: '/tmp/x' },
+          toolRef: TOOL_REF,
+          displayName: TOOL_DISPLAY_NAME,
+          input: { fileEntryId: 'file-1' },
           status: 'pending',
         },
       });
@@ -753,8 +1163,9 @@ describe('MobileAgentHost', () => {
           id: approvalId,
           turnId: controller.turnId,
           toolCallId: 'call-1',
-          toolName: 'delete_file',
-          input: { path: '/tmp/x' },
+          toolRef: TOOL_REF,
+          displayName: TOOL_DISPLAY_NAME,
+          input: { fileEntryId: 'file-1' },
           status: decision === 'approve' ? 'approved' : 'denied',
         },
       });
@@ -764,10 +1175,18 @@ describe('MobileAgentHost', () => {
           id: 'tool-0',
           type: 'tool',
           toolCallId: 'call-1',
-          toolName: 'delete_file',
+          toolRef: TOOL_REF,
+          providerName: TOOL_PROVIDER_NAME,
+          displayName: TOOL_DISPLAY_NAME,
           state: decision === 'approve' ? 'output-available' : 'denied',
-          input: { path: '/tmp/x' },
-          output: decision === 'approve' ? { deleted: true } : undefined,
+          input: { fileEntryId: 'file-1' },
+          output:
+            decision === 'approve'
+              ? { value: { deleted: true }, artifacts: [] }
+              : {
+                  value: { status: 'denied', reason: 'The user denied this tool call.' },
+                  artifacts: [],
+                },
         },
       });
       controller.emit({ type: 'completed' });
@@ -829,6 +1248,310 @@ describe('MobileAgentHost', () => {
     expect(toolPart).toMatchObject({ type: 'tool', state: 'output-available' });
   });
 
+  test('validates managed files before reservation and persists authoritative references', async () => {
+    const requests: RuntimeExecutionRequest[] = [];
+    const fake = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR })
+      .script((controller) => {
+        requests.push(controller.request);
+        controller.emit({ type: 'completed' });
+      })
+      .script((controller) => {
+        requests.push(controller.request);
+        controller.emit({ type: 'completed' });
+      });
+    const imageFact = {
+      fileEntryId: FILE_ENTRY_ID,
+      mediaType: 'image/png',
+      name: 'managed.png',
+      size: 128,
+    };
+    const resolveAvailable = jest
+      .fn<Promise<ReadonlyMap<string, typeof imageFact>>, [readonly string[]]>()
+      .mockResolvedValueOnce(new Map([[FILE_ENTRY_ID, imageFact]]))
+      .mockResolvedValueOnce(new Map());
+    const readAsDataUrl = jest.fn(async () => 'data:image/png;base64,AAAA');
+    const host = createHost(fake, noOpNaming, { readAsDataUrl, resolveAvailable });
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    const events: AgentEvent[] = [];
+    await host.observeSession(session.id, (event) => events.push(event));
+
+    await host.submitMessage({
+      sessionId: session.id,
+      parts: [
+        { type: 'text', text: 'Remember this image.' },
+        { type: 'file', fileEntryId: FILE_ENTRY_ID, mediaType: 'image/png' },
+      ],
+    });
+    await waitFor(() => terminalTurnEvent(events) !== undefined, 'the attachment turn');
+
+    expect(resolveAvailable).toHaveBeenNthCalledWith(1, [FILE_ENTRY_ID]);
+    const transcript = await store.listMessages(session.id);
+    expect(transcript[0]?.parts).toEqual([
+      { id: 'input-0', type: 'text', text: 'Remember this image.', state: 'done' },
+      {
+        id: 'input-1',
+        type: 'file',
+        fileEntryId: FILE_ENTRY_ID,
+        mediaType: 'image/png',
+        name: 'managed.png',
+        purpose: 'input-attachment',
+      },
+    ]);
+    expect(requests[0]?.input).toEqual([
+      { type: 'text', text: 'Remember this image.' },
+      {
+        type: 'file',
+        mediaType: 'image/png',
+        name: 'managed.png',
+        uri: 'data:image/png;base64,AAAA',
+      },
+    ]);
+    expect(JSON.stringify(transcript)).not.toContain('data:image');
+
+    // A later missing blob does not invalidate the historical reference or
+    // fail a text-only turn. Its content is omitted from Pi history.
+    events.length = 0;
+    await host.submitMessage({
+      sessionId: session.id,
+      parts: [{ type: 'text', text: 'Continue.' }],
+    });
+    await waitFor(() => terminalTurnEvent(events) !== undefined, 'the follow-up turn');
+    expect(resolveAvailable).toHaveBeenCalledTimes(2);
+    expect(requests[1]?.history.flatMap((turn) => turn.messages)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          parts: expect.arrayContaining([expect.objectContaining({ type: 'file' })]),
+        }),
+      ]),
+    );
+    expect((await store.listMessages(session.id))[0]?.parts[1]).toMatchObject({
+      fileEntryId: FILE_ENTRY_ID,
+      purpose: 'input-attachment',
+    });
+  });
+
+  test('replays available managed images across turns for an image-capable model', async () => {
+    const requests: RuntimeExecutionRequest[] = [];
+    const fake = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR })
+      .script((controller) => {
+        requests.push(controller.request);
+        controller.emit({ type: 'completed' });
+      })
+      .script((controller) => {
+        requests.push(controller.request);
+        controller.emit({ type: 'completed' });
+      });
+    const fact = {
+      fileEntryId: FILE_ENTRY_ID,
+      mediaType: 'image/png',
+      name: 'managed.png',
+      size: 128,
+    };
+    const files: ManagedFileResolver = {
+      readAsDataUrl: async () => 'data:image/png;base64,AAAA',
+      resolveAvailable: async () => new Map([[FILE_ENTRY_ID, fact]]),
+    };
+    const host = createHost(fake, noOpNaming, files);
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    const events: AgentEvent[] = [];
+    await host.observeSession(session.id, (event) => events.push(event));
+
+    await host.submitMessage({
+      sessionId: session.id,
+      parts: [{ type: 'file', fileEntryId: FILE_ENTRY_ID, mediaType: 'image/png' }],
+    });
+    await waitFor(() => terminalTurnEvent(events) !== undefined, 'the first image turn');
+    events.length = 0;
+    await host.submitMessage({
+      sessionId: session.id,
+      parts: [{ type: 'text', text: 'What was in that image?' }],
+    });
+    await waitFor(() => terminalTurnEvent(events) !== undefined, 'the historical image turn');
+
+    expect(requests[1]?.history).toEqual(
+      expect.arrayContaining([
+        {
+          turnId: expect.any(String),
+          messages: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  type: 'file',
+                  mediaType: 'image/png',
+                  name: 'managed.png',
+                  uri: 'data:image/png;base64,AAAA',
+                },
+              ],
+            },
+          ],
+        },
+      ]),
+    );
+  });
+
+  test('rejects unsupported models and endpoints before reserving image messages', async () => {
+    const fact = {
+      fileEntryId: FILE_ENTRY_ID,
+      mediaType: 'image/png',
+      name: 'managed.png',
+      size: 128,
+    };
+    const textOnlyRuntime = new FakeRuntime({
+      descriptor: FAKE_DESCRIPTOR,
+      modelPreflight: {
+        contextWindow: 128_000,
+        inputModalities: ['text'],
+        maxInputTokens: 120_000,
+        maxOutputTokens: 8_000,
+        supportsTools: true,
+      },
+    });
+    const files: ManagedFileResolver = {
+      readAsDataUrl: jest.fn(async () => 'data:image/png;base64,AAAA'),
+      resolveAvailable: async () => new Map([[FILE_ENTRY_ID, fact]]),
+    };
+    const host = createHost(textOnlyRuntime, noOpNaming, files);
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+
+    await expect(
+      host.submitMessage({
+        sessionId: session.id,
+        parts: [{ type: 'file', fileEntryId: FILE_ENTRY_ID, mediaType: 'image/png' }],
+      }),
+    ).rejects.toMatchObject({ view: { code: 'CAPABILITY_UNSUPPORTED' } });
+    expect(await store.listMessages(session.id)).toEqual([]);
+    expect(files.readAsDataUrl).not.toHaveBeenCalled();
+
+    const unsupportedEndpointRuntime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR });
+    jest
+      .spyOn(unsupportedEndpointRuntime, 'preflightModel')
+      .mockRejectedValue(new Error('unsupported endpoint containing private configuration'));
+    const endpointHost = createHost(unsupportedEndpointRuntime, noOpNaming, files);
+    const endpointSession = await endpointHost.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    await expect(
+      endpointHost.submitMessage({
+        sessionId: endpointSession.id,
+        parts: [{ type: 'file', fileEntryId: FILE_ENTRY_ID, mediaType: 'image/png' }],
+      }),
+    ).rejects.toMatchObject({
+      message: 'The selected model or provider endpoint cannot execute this turn.',
+      view: { code: 'CAPABILITY_UNSUPPORTED' },
+    });
+    expect(await store.listMessages(endpointSession.id)).toEqual([]);
+  });
+
+  test('aborts managed image reads and discards late data when the turn is cancelled', async () => {
+    let readSignal: AbortSignal | undefined;
+    let resolveRead!: (value: string) => void;
+    const read = new Promise<string>((resolve) => {
+      resolveRead = resolve;
+    });
+    const fact = {
+      fileEntryId: FILE_ENTRY_ID,
+      mediaType: 'image/png',
+      name: 'managed.png',
+      size: 128,
+    };
+    const runtime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR }).script(() => {
+      throw new Error('Runtime must not start after an image read is cancelled.');
+    });
+    const host = createHost(runtime, noOpNaming, {
+      readAsDataUrl: async (_file, signal) => {
+        readSignal = signal;
+        return read;
+      },
+      resolveAvailable: async () => new Map([[FILE_ENTRY_ID, fact]]),
+    });
+    const session = await host.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    const events: AgentEvent[] = [];
+    await host.observeSession(session.id, (event) => events.push(event));
+
+    const submitted = await host.submitMessage({
+      sessionId: session.id,
+      parts: [{ type: 'file', fileEntryId: FILE_ENTRY_ID, mediaType: 'image/png' }],
+    });
+    await waitFor(() => readSignal !== undefined, 'the managed image read');
+    await host.cancelTurn({ sessionId: session.id, turnId: submitted.turnId });
+    expect(readSignal?.aborted).toBe(true);
+    resolveRead('data:image/png;base64,LATE');
+    await waitFor(
+      () => terminalTurnEvent(events)?.turn.status === 'cancelled',
+      'the cancelled image turn',
+    );
+
+    expect(JSON.stringify(await store.listMessages(session.id))).not.toContain('LATE');
+  });
+
+  test('rejects unavailable and forged managed-file input before reservation', async () => {
+    const facts = new Map([
+      [
+        FILE_ENTRY_ID,
+        {
+          fileEntryId: FILE_ENTRY_ID,
+          mediaType: 'image/png',
+          name: 'managed.png',
+          size: 128,
+        },
+      ],
+    ]);
+    const availableHost = createHost(new FakeRuntime({ descriptor: FAKE_DESCRIPTOR }), noOpNaming, {
+      readAsDataUrl: async () => 'data:image/png;base64,AAAA',
+      resolveAvailable: async () => facts,
+    });
+    const availableSession = await availableHost.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+
+    await expect(
+      availableHost.submitMessage({
+        sessionId: availableSession.id,
+        parts: [
+          {
+            type: 'file',
+            fileEntryId: FILE_ENTRY_ID,
+            mediaType: 'image/jpeg',
+            name: 'forged.jpg',
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ view: { code: 'ATTACHMENT_METADATA_MISMATCH' } });
+    expect(await store.listMessages(availableSession.id)).toEqual([]);
+
+    const unavailableHost = createHost(
+      new FakeRuntime({ descriptor: FAKE_DESCRIPTOR }),
+      noOpNaming,
+      noFiles,
+    );
+    const unavailableSession = await unavailableHost.createSession({
+      agentId: AGENT_ID,
+      executionTarget: { kind: 'local' },
+    });
+    await expect(
+      unavailableHost.submitMessage({
+        sessionId: unavailableSession.id,
+        parts: [{ type: 'file', fileEntryId: FILE_ENTRY_ID, mediaType: 'image/png' }],
+      }),
+    ).rejects.toMatchObject({ view: { code: 'ATTACHMENT_UNAVAILABLE' } });
+    expect(await store.listMessages(unavailableSession.id)).toEqual([]);
+  });
+
   test('fails closed on unknown sessions, agents, and unsupported input', async () => {
     const host = hostWithText(['unused']);
 
@@ -846,13 +1569,13 @@ describe('MobileAgentHost', () => {
       agentId: AGENT_ID,
       executionTarget: { kind: 'local' },
     });
-    // attachments: false — file input is rejected before any reservation.
+    // Raw or unknown ids are rejected before any reservation.
     await expect(
       host.submitMessage({
         sessionId: session.id,
-        parts: [{ type: 'file', mediaType: 'image/png', uri: 'file:///x.png' }],
+        parts: [{ type: 'file', fileEntryId: 'file:///private/image.png', mediaType: 'image/png' }],
       }),
-    ).rejects.toMatchObject({ view: { code: 'CAPABILITY_UNSUPPORTED' } });
+    ).rejects.toMatchObject({ view: { code: 'ATTACHMENT_UNAVAILABLE' } });
     expect(await store.listMessages(session.id)).toEqual([]);
 
     // Rename and delete round out the session lifecycle.

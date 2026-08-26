@@ -7,18 +7,15 @@ import {
   Phase,
   ServicePhase,
 } from '@/backend/core/lifecycle';
-import type {
-  AgentErrorView,
-  AgentMessagePart,
-  AgentMessageView,
-  AgentSessionView,
-} from '@/shared/contracts/agent';
+import type { AgentErrorView, AgentMessageView, AgentSessionView } from '@/shared/contracts/agent';
 
 import type {
   AgentSessionStore,
   FinalizeAssistantMessageInput,
+  ReserveSubmissionInput,
   ReserveSubmissionResult,
 } from './AgentSessionStore';
+import { interruptNonTerminalToolParts } from './mapping';
 
 const UNSETTLED_MESSAGE_STATUSES = new Set<AgentMessageView['status']>(['pending', 'streaming']);
 
@@ -35,6 +32,7 @@ function cloneJson<T>(value: T): T {
 type StoredMessage = {
   view: AgentMessageView;
   error: AgentErrorView | null;
+  contextCheckpoint: unknown | null;
 };
 
 /**
@@ -123,10 +121,7 @@ export class InMemoryAgentSessionStore extends BaseService implements AgentSessi
     return true;
   }
 
-  async reserveSubmission(input: {
-    sessionId: string;
-    userParts: AgentMessagePart[];
-  }): Promise<ReserveSubmissionResult> {
+  async reserveSubmission(input: ReserveSubmissionInput): Promise<ReserveSubmissionResult> {
     const transcript = this.messages.get(input.sessionId);
     if (!transcript) {
       throw new Error(`Cannot reserve a submission for an unknown session: ${input.sessionId}`);
@@ -142,6 +137,8 @@ export class InMemoryAgentSessionStore extends BaseService implements AgentSessi
       status: 'success',
       parts: cloneJson(input.userParts),
       usage: null,
+      modelId: null,
+      inferenceSnapshot: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -153,15 +150,37 @@ export class InMemoryAgentSessionStore extends BaseService implements AgentSessi
       status: 'pending',
       parts: [],
       usage: null,
+      modelId: input.modelId,
+      inferenceSnapshot: {
+        status: 'supported',
+        snapshot: cloneJson(input.inferenceSnapshot),
+      },
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    transcript.push({ view: userMessage, error: null }, { view: assistantMessage, error: null });
+    transcript.push(
+      { view: userMessage, error: null, contextCheckpoint: null },
+      { view: assistantMessage, error: null, contextCheckpoint: null },
+    );
     return cloneJson({ turnId, userMessage, assistantMessage });
   }
 
   async listMessages(sessionId: string): Promise<AgentMessageView[]> {
     return cloneJson((this.messages.get(sessionId) ?? []).map((stored) => stored.view));
+  }
+
+  async getLatestContextCheckpoint(sessionId: string) {
+    const transcript = this.messages.get(sessionId) ?? [];
+    for (let index = transcript.length - 1; index >= 0; index -= 1) {
+      const stored = transcript[index];
+      if (stored?.view.role === 'assistant' && stored.contextCheckpoint !== null) {
+        return cloneJson({
+          assistantMessageId: stored.view.id,
+          checkpoint: stored.contextCheckpoint,
+        });
+      }
+    }
+    return null;
   }
 
   async finalizeAssistantMessage(input: FinalizeAssistantMessageInput): Promise<AgentMessageView> {
@@ -180,6 +199,10 @@ export class InMemoryAgentSessionStore extends BaseService implements AgentSessi
         updatedAt: nowIso(),
       };
       stored.error = input.error === null ? null : cloneJson(input.error);
+      stored.contextCheckpoint =
+        input.status === 'success' && input.contextCheckpoint !== null
+          ? cloneJson(input.contextCheckpoint)
+          : null;
       return cloneJson(stored.view);
     }
     throw new Error(`Cannot finalize an unknown message: ${input.assistantMessageId}`);
@@ -192,7 +215,12 @@ export class InMemoryAgentSessionStore extends BaseService implements AgentSessi
         if (!UNSETTLED_MESSAGE_STATUSES.has(stored.view.status)) {
           continue;
         }
-        stored.view = { ...stored.view, status: 'interrupted', updatedAt: nowIso() };
+        stored.view = {
+          ...stored.view,
+          status: 'interrupted',
+          parts: interruptNonTerminalToolParts(stored.view.parts, error.message),
+          updatedAt: nowIso(),
+        };
         if (stored.view.role === 'assistant') {
           stored.error = cloneJson(error);
           count += 1;

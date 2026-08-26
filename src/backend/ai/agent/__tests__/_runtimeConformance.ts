@@ -1,7 +1,7 @@
 /**
  * Reusable Agent Runtime conformance suite.
  *
- * `describeRuntimeConformance` covers all eleven items from the "Conformance"
+ * `describeRuntimeConformance` covers the executable items from the "Conformance"
  * section of `docs/references/agent/agent-runtime.md`. Any {@link AgentRuntime}
  * implementation plugs in by supplying a {@link RuntimeConformanceHarness}: the
  * suite drives the runtime only through the public contract, while the harness
@@ -14,15 +14,16 @@
 
 import { readFileSync } from 'node:fs';
 
-import type { AgentRuntime, RuntimeEvent, RuntimeExecutionRequest } from '../types';
+import type { AgentRuntime, RuntimeEvent, RuntimeExecutionRequest, RuntimeToolRef } from '../types';
 
 export type ArrangedRequest = {
   request: RuntimeExecutionRequest;
 };
 
 export type ArrangedApprovalRequest = ArrangedRequest & {
-  /** The `ask`-mode tool name the run requests approval for. */
-  toolName: string;
+  /** Stable identity and display snapshot carried by the approval. */
+  toolRef: RuntimeToolRef;
+  displayName: string;
   /** The tool call id carried by the tool part and its approval. */
   toolCallId: string;
   /** Reports whether the tool implementation actually ran. */
@@ -158,6 +159,13 @@ export function describeRuntimeConformance(harness: RuntimeConformanceHarness): 
     expect(typeof capabilities.tools).toBe('boolean');
     expect(typeof capabilities.approvals).toBe('boolean');
     expect(typeof capabilities.attachments).toBe('boolean');
+
+    const preflight = await first.preflightModel({ providerId: 'provider', modelId: 'model' });
+    expect(preflight.contextWindow).toBeGreaterThan(0);
+    expect(preflight.maxInputTokens).toBeGreaterThanOrEqual(0);
+    expect(preflight.maxOutputTokens).toBeGreaterThan(0);
+    expect(preflight.inputModalities).toContain('text');
+    expect(typeof preflight.supportsTools).toBe('boolean');
   });
 
   // 2 & 3. Exactly one terminal event, and nothing follows it.
@@ -174,6 +182,30 @@ export function describeRuntimeConformance(harness: RuntimeConformanceHarness): 
       expect(terminalIndices).toHaveLength(1);
       // The single terminal is the last event; nothing follows it.
       expect(terminalIndices[0]).toBe(events.length - 1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  test('accepts grouped history and an opaque context checkpoint', async () => {
+    const runtime = await harness.createRuntime();
+    const { request } = await harness.arrangeSuccess(runtime, 'turn-context-checkpoint');
+    request.history = [
+      {
+        turnId: 'turn-after-anchor',
+        messages: [{ role: 'user', parts: [{ type: 'text', text: 'Retained input.' }] }],
+      },
+    ];
+    request.contextCheckpoint = {
+      version: 1,
+      anchorTurnId: 'turn-anchor',
+      payload: { summary: 'Earlier input.' },
+    };
+    const session = await runtime.open();
+    try {
+      const events = await collect(session.execute(request));
+
+      expect(events.at(-1)?.type).toBe('completed');
     } finally {
       await session.close();
     }
@@ -248,6 +280,23 @@ export function describeRuntimeConformance(harness: RuntimeConformanceHarness): 
       const terminals = all.filter(isTerminal);
       expect(terminals).toHaveLength(1);
       expect(terminals[0]?.type).toBe('cancelled');
+      if (request.tools.length > 0) {
+        expect(
+          all.find(
+            (event) =>
+              event.type === 'part.replace' &&
+              event.part.type === 'tool' &&
+              event.part.state === 'interrupted',
+          ),
+        ).toMatchObject({
+          part: {
+            output: {
+              artifacts: [],
+              value: { status: 'interrupted' },
+            },
+          },
+        });
+      }
     } finally {
       await session.close();
     }
@@ -270,7 +319,8 @@ export function describeRuntimeConformance(harness: RuntimeConformanceHarness): 
         throw new Error('expected an approval.requested event');
       }
       expect(requested.approval.turnId).toBe(arranged.request.turnId);
-      expect(requested.approval.toolName).toBe(arranged.toolName);
+      expect(requested.approval.toolRef).toEqual(arranged.toolRef);
+      expect(requested.approval.displayName).toBe(arranged.displayName);
       expect(requested.approval.toolCallId).toBe(arranged.toolCallId);
 
       await session.respondApproval({
@@ -317,6 +367,21 @@ export function describeRuntimeConformance(harness: RuntimeConformanceHarness): 
       const all = [...untilApproval.events, ...rest];
       expect(all.filter(isTerminal)).toHaveLength(1);
       expect(arranged.toolExecuted()).toBe(false);
+      expect(
+        all.find(
+          (event) =>
+            event.type === 'part.replace' &&
+            event.part.type === 'tool' &&
+            event.part.state === 'denied',
+        ),
+      ).toMatchObject({
+        part: {
+          output: {
+            artifacts: [],
+            value: { status: 'denied' },
+          },
+        },
+      });
     } finally {
       await session.close();
     }

@@ -18,13 +18,18 @@ import {
 } from '../../__tests__/_runtimeConformance';
 import type { AgentRuntime, RuntimeEvent, RuntimeExecutionRequest, RuntimeTool } from '../../types';
 import {
+  DEFAULT_PI_RUNTIME_LIMITS,
   PiRuntime,
   type PiModelResolution,
+  type PiRuntimeLimits,
   type PiRuntimeAgent,
   type PiRuntimeAgentFactory,
 } from '../PiRuntime';
 
 const ERROR_SECRET = 'test-key';
+const TOOL_REF = { source: 'mcp', serverId: 'server-1', rawToolName: 'delete_file' } as const;
+const TOOL_PROVIDER_NAME = 'mcp_server_1_delete_file_a1b2';
+const TOOL_DISPLAY_NAME = 'Delete file';
 
 type TestAgentContext = {
   emit(event: PiAgentEvent): Promise<void>;
@@ -120,14 +125,27 @@ function createResolution(): PiModelResolution {
   };
 }
 
-function createTestRuntime(): PiRuntime {
+function createTestRuntime(limits: PiRuntimeLimits = DEFAULT_PI_RUNTIME_LIMITS): PiRuntime {
   const holder: RuntimeHolder = { resolution: createResolution() };
   const factory: PiRuntimeAgentFactory = (options) => {
     holder.lastOptions = options;
     if (!holder.program) throw new Error('Test Pi Agent program was not configured.');
     return new TestPiAgent(options, holder.program);
   };
-  const runtime = new PiRuntime({ resolveModel: () => holder.resolution }, factory);
+  const runtime = new PiRuntime(
+    {
+      preflightModel: () => ({
+        contextWindow: holder.resolution.model.contextWindow,
+        inputModalities: [...holder.resolution.model.input],
+        maxInputTokens: holder.resolution.model.contextWindow - holder.resolution.model.maxTokens,
+        maxOutputTokens: holder.resolution.model.maxTokens,
+        supportsTools: holder.resolution.supportsTools,
+      }),
+      resolveModel: () => holder.resolution,
+    },
+    factory,
+    limits,
+  );
   holders.set(runtime, holder);
   return runtime;
 }
@@ -208,6 +226,7 @@ function baseRequest(
     instructions: 'Be helpful.',
     model: { providerId: 'mock-provider', modelId: 'mock-model' },
     history: [],
+    contextCheckpoint: null,
     input: [{ type: 'text', text: 'Hello.' }],
     options: {},
     tools: [],
@@ -217,17 +236,19 @@ function baseRequest(
 
 function askTool(onExecute: () => void): RuntimeTool {
   return {
+    ref: TOOL_REF,
+    providerName: TOOL_PROVIDER_NAME,
+    displayName: TOOL_DISPLAY_NAME,
     approval: 'ask',
     description: 'Delete a file.',
     inputSchema: {
       type: 'object',
-      properties: { path: { type: 'string' } },
-      required: ['path'],
+      properties: { fileEntryId: { type: 'string' } },
+      required: ['fileEntryId'],
     },
-    name: 'delete_file',
     async execute() {
       onExecute();
-      return { deleted: true };
+      return { value: { deleted: true }, artifacts: [] };
     },
   };
 }
@@ -238,7 +259,7 @@ function approvalProgram(toolCallId: string): TestAgentProgram {
     if (!tool) throw new Error('Approval program requires one tool.');
     const partial = assistantMessage({
       content: [
-        { type: 'toolCall', id: toolCallId, name: tool.name, arguments: { path: '/tmp/a' } },
+        { type: 'toolCall', id: toolCallId, name: tool.name, arguments: { fileEntryId: 'file-1' } },
       ],
       stopReason: 'toolUse',
     });
@@ -257,7 +278,23 @@ function approvalProgram(toolCallId: string): TestAgentProgram {
       },
     });
     await context.emit({ type: 'message_end', message: partial });
-    const result = await tool.execute(toolCallId, { path: '/tmp/a' }, context.signal);
+    let result: Awaited<ReturnType<typeof tool.execute>>;
+    try {
+      result = await tool.execute(toolCallId, { fileEntryId: 'file-1' }, context.signal);
+    } catch {
+      const failedToolResult: ToolResultMessage = {
+        role: 'toolResult',
+        toolCallId,
+        toolName: tool.name,
+        content: [{ type: 'text', text: 'Native cancellation failure.' }],
+        details: { message: 'Native cancellation failure.' },
+        isError: true,
+        timestamp: Date.now(),
+      };
+      await context.emit({ type: 'turn_end', message: partial, toolResults: [failedToolResult] });
+      return;
+    }
+    if (context.signal.aborted) return;
     const toolResult: ToolResultMessage = {
       role: 'toolResult',
       toolCallId,
@@ -299,24 +336,15 @@ const harness: RuntimeConformanceHarness = {
       request: baseRequest(turnId, { tools: [tool] }),
       toolCallId,
       toolExecuted: () => executed,
-      toolName: tool.name,
+      toolRef: tool.ref,
+      displayName: tool.displayName,
     };
   },
 
   arrangeCancellable(runtime, turnId): ArrangedRequest {
-    arrange(runtime, async (context) => {
-      const partial = assistantMessage({ content: [{ type: 'text', text: 'Working' }] });
-      await context.emit({ type: 'message_start', message: partial });
-      await context.emit({
-        type: 'message_update',
-        message: partial,
-        assistantMessageEvent: { type: 'text_start', contentIndex: 0, partial },
-      });
-      await new Promise<void>((resolve) => {
-        context.signal.addEventListener('abort', () => resolve(), { once: true });
-      });
-    });
-    return { request: baseRequest(turnId) };
+    const tool = askTool(() => undefined);
+    arrange(runtime, approvalProgram('call-cancel'));
+    return { request: baseRequest(turnId, { tools: [tool] }) };
   },
 
   arrangeError(runtime, turnId): ArrangedErrorRequest {
@@ -333,6 +361,7 @@ const harness: RuntimeConformanceHarness = {
   sourceFiles: [
     path.resolve(__dirname, '../../types.ts'),
     path.resolve(__dirname, '../../RuntimeEventChannel.ts'),
+    path.resolve(__dirname, '../../toolResults.ts'),
     path.resolve(__dirname, '../PiRuntime.ts'),
     path.resolve(__dirname, '../modelMessages.ts'),
   ],
@@ -348,7 +377,67 @@ async function collect(stream: AsyncIterable<RuntimeEvent>): Promise<RuntimeEven
   return events;
 }
 
+async function waitFor(predicate: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 describe('PiRuntime mapping', () => {
+  test('preflights and maps current and historical inline images without retaining data URLs', async () => {
+    const runtime = createTestRuntime();
+    const holder = holders.get(runtime);
+    if (!holder) throw new Error('missing Runtime holder');
+    holder.resolution = {
+      ...holder.resolution,
+      model: { ...holder.resolution.model, input: ['text', 'image'] },
+    };
+    let prompt: PiMessage | undefined;
+    const arranged = arrange(runtime, async (context) => {
+      prompt = context.prompt;
+      await emitText(context, 'I see both images.');
+    });
+    const session = await runtime.open();
+    const image = {
+      type: 'file' as const,
+      mediaType: 'image/png',
+      name: 'image.png',
+      uri: 'data:image/png;base64,AAAA',
+    };
+
+    expect(await runtime.preflightModel(baseRequest('preflight').model)).toMatchObject({
+      inputModalities: ['text', 'image'],
+    });
+    await collect(
+      session.execute(
+        baseRequest('turn-images', {
+          history: [{ turnId: 'turn-before-images', messages: [{ role: 'user', parts: [image] }] }],
+          input: [{ type: 'text', text: 'Compare these.' }, image],
+        }),
+      ),
+    );
+
+    expect(arranged.lastOptions?.initialState?.model?.input).toEqual(['text', 'image']);
+    expect(arranged.lastOptions?.initialState?.messages).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }],
+        timestamp: expect.any(Number),
+      },
+    ]);
+    expect(prompt).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Compare these.' },
+        { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+      ],
+      timestamp: expect.any(Number),
+    });
+    await session.close();
+  });
+
   test('surfaces provider errors after redacting resolved credentials', async () => {
     const runtime = createTestRuntime();
     arrange(runtime, async (context) => {
@@ -410,24 +499,30 @@ describe('PiRuntime mapping', () => {
     const session = await runtime.open();
     const request = baseRequest('turn-context', {
       history: [
-        { role: 'system', parts: [{ type: 'text', text: 'Prior system note.' }] },
-        { role: 'user', parts: [{ type: 'text', text: 'Earlier question.' }] },
-        { role: 'assistant', parts: [{ type: 'reasoning', text: 'Earlier thought.' }] },
-        { role: 'assistant', parts: [{ type: 'text', text: 'Earlier answer.' }] },
         {
-          role: 'assistant',
-          parts: [
+          turnId: 'turn-history',
+          messages: [
+            { role: 'system', parts: [{ type: 'text', text: 'Prior system note.' }] },
+            { role: 'user', parts: [{ type: 'text', text: 'Earlier question.' }] },
+            { role: 'assistant', parts: [{ type: 'reasoning', text: 'Earlier thought.' }] },
+            { role: 'assistant', parts: [{ type: 'text', text: 'Earlier answer.' }] },
             {
-              type: 'tool-call',
-              toolCallId: 'historic-call',
-              toolName: 'lookup',
-              input: { query: 'Cherry Studio' },
-            },
-            {
-              type: 'tool-result',
-              toolCallId: 'historic-call',
-              output: { found: true },
-              isError: false,
+              role: 'assistant',
+              parts: [
+                {
+                  type: 'tool-call',
+                  toolCallId: 'historic-call',
+                  toolRef: { source: 'mcp', serverId: 'server-2', rawToolName: 'lookup' },
+                  providerName: 'mcp_server_2_lookup_c3d4',
+                  input: { query: 'Cherry Studio' },
+                },
+                {
+                  type: 'tool-result',
+                  toolCallId: 'historic-call',
+                  output: { value: { found: true }, artifacts: [] },
+                  isError: false,
+                },
+              ],
             },
           ],
         },
@@ -469,7 +564,7 @@ describe('PiRuntime mapping', () => {
             {
               type: 'toolCall',
               id: 'historic-call',
-              name: 'lookup',
+              name: 'mcp_server_2_lookup_c3d4',
               arguments: { query: 'Cherry Studio' },
             },
           ],
@@ -477,8 +572,8 @@ describe('PiRuntime mapping', () => {
         {
           role: 'toolResult',
           toolCallId: 'historic-call',
-          toolName: 'lookup',
-          details: { found: true },
+          toolName: 'mcp_server_2_lookup_c3d4',
+          details: { value: { found: true }, artifacts: [] },
         },
       ],
       systemPrompt: 'Be helpful.\n\nPrior system note.',
@@ -514,6 +609,414 @@ describe('PiRuntime mapping', () => {
       },
     ]);
     expect(holder.lastOptions).toBeUndefined();
+    await session.close();
+  });
+
+  test('maps stable tool identity, result envelopes, and managed artifacts', async () => {
+    const runtime = createTestRuntime();
+    const tool: RuntimeTool = {
+      ref: { source: 'builtin', capabilityId: 'create-report' },
+      providerName: 'builtin_create_report_a1b2',
+      displayName: 'Create report',
+      description: 'Create a managed report.',
+      inputSchema: { type: 'object' },
+      approval: 'auto',
+      execute: async () => ({
+        value: { created: true },
+        artifacts: [
+          {
+            ref: { kind: 'managed-file', fileEntryId: 'file-1' },
+            mediaType: 'text/markdown',
+            name: 'report.md',
+            kind: 'created',
+          },
+        ],
+      }),
+    };
+    const holder = arrange(runtime, approvalProgram('artifact-call'));
+    const session = await runtime.open();
+
+    const events = await collect(session.execute(baseRequest('turn-artifact', { tools: [tool] })));
+
+    expect(holder.lastOptions?.initialState?.tools?.[0]).toMatchObject({
+      name: tool.providerName,
+      label: tool.displayName,
+    });
+    expect(
+      events.find(
+        (event) =>
+          event.type === 'part.replace' &&
+          event.part.type === 'tool' &&
+          event.part.state === 'output-available',
+      ),
+    ).toMatchObject({
+      part: {
+        toolRef: tool.ref,
+        providerName: tool.providerName,
+        displayName: tool.displayName,
+        output: {
+          value: { created: true },
+          artifacts: [{ ref: { kind: 'managed-file', fileEntryId: 'file-1' } }],
+        },
+      },
+    });
+    expect(
+      events.find((event) => event.type === 'part.add' && event.part.type === 'file'),
+    ).toMatchObject({
+      part: {
+        ref: { kind: 'managed-file', fileEntryId: 'file-1' },
+        purpose: 'artifact',
+      },
+    });
+    await session.close();
+  });
+
+  test('keeps parallel approvals independent and never executes a denied call', async () => {
+    const runtime = createTestRuntime();
+    let executionCount = 0;
+    const tool = askTool(() => {
+      executionCount += 1;
+    });
+    arrange(runtime, async (context) => {
+      const piTool = context.options.initialState?.tools?.[0];
+      if (!piTool) throw new Error('Parallel approval program requires one tool.');
+      const message = assistantMessage({
+        content: [
+          {
+            type: 'toolCall',
+            id: 'parallel-call-1',
+            name: piTool.name,
+            arguments: { fileEntryId: 'file-1' },
+          },
+          {
+            type: 'toolCall',
+            id: 'parallel-call-2',
+            name: piTool.name,
+            arguments: { fileEntryId: 'file-2' },
+          },
+        ],
+        stopReason: 'toolUse',
+      });
+      const [first, second] = await Promise.all([
+        piTool.execute('parallel-call-1', { fileEntryId: 'file-1' }, context.signal),
+        piTool.execute('parallel-call-2', { fileEntryId: 'file-2' }, context.signal),
+      ]);
+      await context.emit({
+        type: 'turn_end',
+        message,
+        toolResults: [
+          {
+            role: 'toolResult',
+            toolCallId: 'parallel-call-1',
+            toolName: piTool.name,
+            content: first.content,
+            details: first.details,
+            isError: false,
+            timestamp: Date.now(),
+          },
+          {
+            role: 'toolResult',
+            toolCallId: 'parallel-call-2',
+            toolName: piTool.name,
+            content: second.content,
+            details: second.details,
+            isError: false,
+            timestamp: Date.now(),
+          },
+        ],
+      });
+      await emitText(context, 'Handled independently.');
+    });
+    const session = await runtime.open();
+    const events: RuntimeEvent[] = [];
+    const collecting = (async () => {
+      for await (const event of session.execute(
+        baseRequest('turn-parallel-approvals', { tools: [tool] }),
+      )) {
+        events.push(event);
+      }
+    })();
+    await waitFor(
+      () => events.filter((event) => event.type === 'approval.requested').length === 2,
+      'both approval requests',
+    );
+
+    await session.respondApproval({
+      approvalId: 'approval-parallel-call-2',
+      decision: 'approve',
+      turnId: 'turn-parallel-approvals',
+    });
+    await session.respondApproval({
+      approvalId: 'approval-parallel-call-1',
+      decision: 'deny',
+      turnId: 'turn-parallel-approvals',
+    });
+    await collecting;
+
+    expect(executionCount).toBe(1);
+    expect(
+      events.flatMap((event) => (event.type === 'approval.resolved' ? [event.approval] : [])),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolCallId: 'parallel-call-1', status: 'denied' }),
+        expect.objectContaining({ toolCallId: 'parallel-call-2', status: 'approved' }),
+      ]),
+    );
+    expect(
+      events.flatMap((event) =>
+        event.type === 'part.replace' && event.part.type === 'tool' ? [event.part] : [],
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolCallId: 'parallel-call-1', state: 'denied' }),
+        expect.objectContaining({ toolCallId: 'parallel-call-2', state: 'output-available' }),
+      ]),
+    );
+    expect(events.at(-1)).toEqual({ type: 'completed' });
+    await session.close();
+  });
+
+  test('normalizes callback failures into a classified result envelope', async () => {
+    const runtime = createTestRuntime();
+    const tool: RuntimeTool = {
+      ref: TOOL_REF,
+      providerName: TOOL_PROVIDER_NAME,
+      displayName: TOOL_DISPLAY_NAME,
+      description: 'Fail safely.',
+      inputSchema: { type: 'object' },
+      approval: 'auto',
+      execute: async () => {
+        throw new Error(`native failure containing ${ERROR_SECRET}`);
+      },
+    };
+    arrange(runtime, approvalProgram('failed-call'));
+    const session = await runtime.open();
+
+    const events = await collect(
+      session.execute(baseRequest('turn-tool-error', { tools: [tool] })),
+    );
+    const failedPart = events.find(
+      (event) =>
+        event.type === 'part.replace' && event.part.type === 'tool' && event.part.state === 'error',
+    );
+
+    expect(failedPart).toMatchObject({
+      part: {
+        error: {
+          code: 'tool_execution_error',
+          message: 'The tool failed to execute.',
+          retryable: false,
+        },
+        output: {
+          value: {
+            status: 'error',
+            error: { code: 'tool_execution_error', retryable: false },
+          },
+          artifacts: [],
+        },
+      },
+    });
+    expect(JSON.stringify(failedPart)).not.toContain(ERROR_SECRET);
+    await session.close();
+  });
+
+  test('preserves a sanitized classified callback error', async () => {
+    const runtime = createTestRuntime();
+    const tool: RuntimeTool = {
+      ref: TOOL_REF,
+      providerName: TOOL_PROVIDER_NAME,
+      displayName: TOOL_DISPLAY_NAME,
+      description: 'Time out safely.',
+      inputSchema: { type: 'object' },
+      approval: 'auto',
+      execute: async () => {
+        throw Object.assign(new Error('The MCP tool call timed out.'), {
+          code: 'mcp_tool_timeout',
+          retryable: true,
+        });
+      },
+    };
+    arrange(runtime, approvalProgram('timeout-call'));
+    const session = await runtime.open();
+
+    const events = await collect(
+      session.execute(baseRequest('turn-tool-timeout', { tools: [tool] })),
+    );
+
+    expect(
+      events.find(
+        (event) =>
+          event.type === 'part.replace' &&
+          event.part.type === 'tool' &&
+          event.part.state === 'error',
+      ),
+    ).toMatchObject({
+      part: {
+        error: {
+          code: 'mcp_tool_timeout',
+          message: 'The MCP tool call timed out.',
+          retryable: true,
+        },
+        output: {
+          value: {
+            status: 'error',
+            error: { code: 'mcp_tool_timeout', retryable: true },
+          },
+          artifacts: [],
+        },
+      },
+    });
+    await session.close();
+  });
+
+  test('stops new callback execution after the per-turn tool call limit', async () => {
+    const runtime = createTestRuntime({
+      maxToolCalls: 1,
+      maxToolSteps: 8,
+      turnTimeoutMs: 60_000,
+    });
+    let executionCount = 0;
+    const tool: RuntimeTool = {
+      ref: TOOL_REF,
+      providerName: TOOL_PROVIDER_NAME,
+      displayName: TOOL_DISPLAY_NAME,
+      description: 'Count executions.',
+      inputSchema: { type: 'object' },
+      approval: 'auto',
+      execute: async () => {
+        executionCount += 1;
+        return { value: { executionCount }, artifacts: [] };
+      },
+    };
+    arrange(runtime, async (context) => {
+      const piTool = context.options.initialState?.tools?.[0];
+      if (!piTool) throw new Error('Tool limit program requires one tool.');
+      const message = assistantMessage({
+        content: [
+          { type: 'toolCall', id: 'call-1', name: piTool.name, arguments: {} },
+          { type: 'toolCall', id: 'call-2', name: piTool.name, arguments: {} },
+        ],
+        stopReason: 'toolUse',
+      });
+      const first = await piTool.execute('call-1', {}, context.signal);
+      const second = await piTool.execute('call-2', {}, context.signal);
+      await context.emit({
+        type: 'turn_end',
+        message,
+        toolResults: [
+          {
+            role: 'toolResult',
+            toolCallId: 'call-1',
+            toolName: piTool.name,
+            content: first.content,
+            details: first.details,
+            isError: false,
+            timestamp: Date.now(),
+          },
+          {
+            role: 'toolResult',
+            toolCallId: 'call-2',
+            toolName: piTool.name,
+            content: second.content,
+            details: second.details,
+            isError: true,
+            timestamp: Date.now(),
+          },
+        ],
+      });
+    });
+    const session = await runtime.open();
+
+    const events = await collect(
+      session.execute(baseRequest('turn-call-limit', { tools: [tool] })),
+    );
+
+    expect(executionCount).toBe(1);
+    expect(events.at(-1)).toEqual({
+      type: 'failed',
+      error: {
+        code: 'tool_call_limit_exceeded',
+        message: 'The turn reached its tool call limit.',
+        retryable: false,
+      },
+    });
+    expect(
+      events.find(
+        (event) =>
+          event.type === 'part.replace' &&
+          event.part.type === 'tool' &&
+          event.part.toolCallId === 'call-2',
+      ),
+    ).toMatchObject({
+      part: { state: 'error', error: { code: 'tool_call_limit_exceeded' } },
+    });
+    await session.close();
+  });
+
+  test('stops the model loop after the configured tool step limit', async () => {
+    const runtime = createTestRuntime({
+      maxToolCalls: 16,
+      maxToolSteps: 1,
+      turnTimeoutMs: 60_000,
+    });
+    let shouldStop = false;
+    arrange(runtime, async (context) => {
+      const message = assistantMessage({ content: [], stopReason: 'toolUse' });
+      const result: ToolResultMessage = {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        toolName: TOOL_PROVIDER_NAME,
+        content: [{ type: 'text', text: '{}' }],
+        details: { artifacts: [], value: {} },
+        isError: false,
+        timestamp: Date.now(),
+      };
+      await context.emit({ type: 'turn_end', message, toolResults: [result] });
+      shouldStop =
+        (await context.options.shouldStopAfterTurn?.({
+          context: { messages: [], systemPrompt: '', tools: [] },
+          message,
+          newMessages: [],
+          toolResults: [result],
+        })) ?? false;
+    });
+    const session = await runtime.open();
+
+    const events = await collect(session.execute(baseRequest('turn-step-limit')));
+
+    expect(shouldStop).toBe(true);
+    expect(events.at(-1)).toEqual({
+      type: 'failed',
+      error: {
+        code: 'tool_step_limit_exceeded',
+        message: 'The turn reached its tool loop step limit.',
+        retryable: false,
+      },
+    });
+    await session.close();
+  });
+
+  test('aborts the model and reports a classified whole-turn timeout', async () => {
+    const runtime = createTestRuntime({
+      maxToolCalls: 16,
+      maxToolSteps: 8,
+      turnTimeoutMs: 5,
+    });
+    arrange(runtime, async (context) => {
+      await new Promise<void>((resolve) => {
+        context.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    });
+    const session = await runtime.open();
+
+    const events = await collect(session.execute(baseRequest('turn-timeout')));
+
+    expect(events).toEqual([
+      {
+        type: 'failed',
+        error: { code: 'turn_timeout', message: 'The Agent turn timed out.', retryable: true },
+      },
+    ]);
     await session.close();
   });
 });

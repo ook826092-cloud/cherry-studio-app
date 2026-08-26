@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import {
   AppStatePolicy,
@@ -8,7 +8,7 @@ import {
   Phase,
   ServicePhase,
 } from '@/backend/core/lifecycle';
-import type { DbService, Database } from '@/backend/data/db/DbService';
+import type { DbService } from '@/backend/data/db/DbService';
 import { agentSessionMessageTable, agentSessionTable } from '@/backend/data/db/schemas';
 import { createOrderedUuid } from '@/backend/data/db/schemas/_columnHelpers';
 import {
@@ -17,7 +17,6 @@ import {
 } from '@/backend/data/services/utils/agentSessionRows';
 import {
   type AgentErrorView,
-  type AgentMessagePart,
   type AgentMessageView,
   type AgentSessionView,
 } from '@/shared/contracts/agent';
@@ -25,8 +24,10 @@ import {
 import type {
   AgentSessionStore,
   FinalizeAssistantMessageInput,
+  ReserveSubmissionInput,
   ReserveSubmissionResult,
 } from './AgentSessionStore';
+import { interruptNonTerminalToolParts } from './mapping';
 
 const UNSETTLED_MESSAGE_STATUSES = ['pending', 'streaming'] as const;
 
@@ -116,10 +117,7 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
     });
   }
 
-  async reserveSubmission(input: {
-    sessionId: string;
-    userParts: AgentMessagePart[];
-  }): Promise<ReserveSubmissionResult> {
+  async reserveSubmission(input: ReserveSubmissionInput): Promise<ReserveSubmissionResult> {
     return this.dbService.withWriteTx(async (tx) => {
       const now = Date.now();
       const touched = await tx
@@ -149,6 +147,8 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
           role: 'assistant',
           status: 'pending',
           data: { version: 1, parts: [] },
+          modelId: input.modelId,
+          messageSnapshot: input.inferenceSnapshot,
         })
         .returning();
       return {
@@ -169,6 +169,37 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
     return rows.map(toAgentMessageView);
   }
 
+  async getLatestContextCheckpoint(sessionId: string) {
+    const [row] = await this.dbService
+      .getDb()
+      .select({
+        assistantMessageId: agentSessionMessageTable.id,
+        checkpointJson: sql<string>`${agentSessionMessageTable.contextCheckpoint}`,
+      })
+      .from(agentSessionMessageTable)
+      .where(
+        and(
+          eq(agentSessionMessageTable.sessionId, sessionId),
+          eq(agentSessionMessageTable.role, 'assistant'),
+          eq(agentSessionMessageTable.status, 'success'),
+          isNotNull(agentSessionMessageTable.contextCheckpoint),
+        ),
+      )
+      .orderBy(desc(agentSessionMessageTable.createdAt), desc(agentSessionMessageTable.id))
+      .limit(1);
+    if (!row) {
+      return null;
+    }
+
+    let checkpoint: unknown = row.checkpointJson;
+    try {
+      checkpoint = JSON.parse(row.checkpointJson) as unknown;
+    } catch {
+      // Return the raw value so the Host can classify it and fall back to full history.
+    }
+    return { assistantMessageId: row.assistantMessageId, checkpoint };
+  }
+
   async finalizeAssistantMessage(input: FinalizeAssistantMessageInput): Promise<AgentMessageView> {
     return this.dbService.withWriteTx(async (tx) => {
       const [row] = await tx
@@ -178,6 +209,7 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
           data: { version: 1, parts: input.parts },
           usage: input.usage,
           error: input.error,
+          contextCheckpoint: input.status === 'success' ? input.contextCheckpoint : null,
         })
         .where(eq(agentSessionMessageTable.id, input.assistantMessageId))
         .returning();
@@ -194,28 +226,31 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
 
   async reconcileInterrupted(error: AgentErrorView): Promise<number> {
     return this.dbService.withWriteTx(async (tx) => {
-      const reconciled = await this.markInterrupted(tx, 'assistant', error);
-      // User/system rows settle at insert; this sweeps any row a future writer
-      // leaves unsettled so reconciliation stays complete by construction.
-      await this.markInterrupted(tx, null, null);
-      return reconciled.length;
-    });
-  }
+      const rows = await tx
+        .select()
+        .from(agentSessionMessageTable)
+        .where(inArray(agentSessionMessageTable.status, [...UNSETTLED_MESSAGE_STATUSES]));
+      let assistantCount = 0;
 
-  private markInterrupted(
-    tx: Database,
-    role: 'assistant' | null,
-    error: AgentErrorView | null,
-  ): Promise<{ id: string }[]> {
-    return tx
-      .update(agentSessionMessageTable)
-      .set({ status: 'interrupted', ...(error ? { error } : {}) })
-      .where(
-        and(
-          inArray(agentSessionMessageTable.status, [...UNSETTLED_MESSAGE_STATUSES]),
-          ...(role ? [eq(agentSessionMessageTable.role, role)] : []),
-        ),
-      )
-      .returning({ id: agentSessionMessageTable.id });
+      for (const row of rows) {
+        const message = toAgentMessageView(row);
+        await tx
+          .update(agentSessionMessageTable)
+          .set({
+            status: 'interrupted',
+            data: {
+              version: 1,
+              parts: interruptNonTerminalToolParts(message.parts, error.message),
+            },
+            ...(message.role === 'assistant' ? { error } : {}),
+          })
+          .where(eq(agentSessionMessageTable.id, message.id));
+        if (message.role === 'assistant') {
+          assistantCount += 1;
+        }
+      }
+
+      return assistantCount;
+    });
   }
 }

@@ -41,6 +41,7 @@ export type RuntimeDescriptor = {
 
 export interface AgentRuntime {
   readonly descriptor: RuntimeDescriptor;
+  preflightModel(model: RuntimeModel): Promise<RuntimeModelPreflight>;
   open(): Promise<AgentRuntimeSession>;
 }
 
@@ -60,10 +61,40 @@ export type RuntimeModel = {
   modelId: string;
 };
 
+export type RuntimeInputModality = 'text' | 'image';
+
+/**
+ * JSON-safe model facts the Host may inspect before reserving a turn. Runtime
+ * implementations keep provider SDK model objects behind their own boundary.
+ */
+export type RuntimeModelPreflight = {
+  contextWindow: number;
+  inputModalities: RuntimeInputModality[];
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  supportsTools: boolean;
+};
+
 export type RuntimeOptions = {
   reasoningEffort?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   maxOutputTokens?: number;
   temperature?: number;
+};
+
+export type RuntimeToolRef =
+  | { source: 'builtin'; capabilityId: string }
+  | { source: 'mcp'; serverId: string; rawToolName: string };
+
+export type RuntimeArtifact = {
+  ref: { kind: 'managed-file'; fileEntryId: string };
+  mediaType: string;
+  name: string;
+  kind: 'created' | 'derived';
+};
+
+export type RuntimeToolResult = {
+  value: RuntimeJsonValue;
+  artifacts: RuntimeArtifact[];
 };
 
 export type RuntimeInputPart =
@@ -76,13 +107,14 @@ export type RuntimeMessagePart =
   | {
       type: 'tool-call';
       toolCallId: string;
-      toolName: string;
+      toolRef: RuntimeToolRef;
+      providerName: string;
       input: RuntimeJsonValue;
     }
   | {
       type: 'tool-result';
       toolCallId: string;
-      output: RuntimeJsonValue;
+      output: RuntimeToolResult;
       isError: boolean;
     };
 
@@ -91,22 +123,38 @@ export type RuntimeMessage = {
   parts: RuntimeMessagePart[];
 };
 
+/** One persisted application turn, kept intact for Runtime-owned context policy. */
+export type RuntimeHistoryTurn = {
+  turnId: string | null;
+  messages: RuntimeMessage[];
+};
+
+/** Versioned, opaque Runtime context artifact persisted and replayed by the Host. */
+export type RuntimeContextCheckpoint = {
+  version: 1;
+  anchorTurnId: string;
+  payload: RuntimeJsonValue;
+};
+
 export type RuntimeTool = {
-  name: string;
+  ref: RuntimeToolRef;
+  providerName: string;
+  displayName: string;
   description: string;
   inputSchema: RuntimeJsonValue;
   approval: 'auto' | 'ask' | 'deny';
   execute(
     input: RuntimeJsonValue,
     context: { signal: AbortSignal; toolCallId: string },
-  ): Promise<RuntimeJsonValue>;
+  ): Promise<RuntimeToolResult>;
 };
 
 export type RuntimeExecutionRequest = {
   turnId: string;
   instructions: string;
   model: RuntimeModel;
-  history: RuntimeMessage[];
+  history: RuntimeHistoryTurn[];
+  contextCheckpoint: RuntimeContextCheckpoint | null;
   input: RuntimeInputPart[];
   tools: RuntimeTool[];
   options: RuntimeOptions;
@@ -122,24 +170,28 @@ export type RuntimeOutputPart =
   | {
       id: string;
       type: 'file';
+      ref: { kind: 'managed-file'; fileEntryId: string };
       mediaType: string;
-      name?: string;
-      uri: string;
+      name: string;
+      purpose: 'artifact';
     }
   | {
       id: string;
       type: 'tool';
       toolCallId: string;
-      toolName: string;
+      toolRef: RuntimeToolRef;
+      providerName: string;
+      displayName: string;
       state:
         | 'input-available'
         | 'awaiting-approval'
         | 'running'
         | 'output-available'
         | 'denied'
-        | 'error';
+        | 'error'
+        | 'interrupted';
       input?: RuntimeJsonValue;
-      output?: RuntimeJsonValue;
+      output?: RuntimeToolResult;
       approvalId?: string;
       error?: RuntimeError;
     };
@@ -148,7 +200,8 @@ export type RuntimeApproval = {
   id: string;
   turnId: string;
   toolCallId: string;
-  toolName: string;
+  toolRef: RuntimeToolRef;
+  displayName: string;
   input: RuntimeJsonValue;
   status: 'pending' | 'approved' | 'denied';
 };
@@ -184,6 +237,7 @@ export type RuntimeEvent =
   | { type: 'part.replace'; part: RuntimeOutputPart }
   | { type: 'approval.requested'; approval: RuntimeApproval }
   | { type: 'approval.resolved'; approval: RuntimeApproval }
+  | { type: 'context.checkpoint'; checkpoint: RuntimeContextCheckpoint }
   | ({ type: 'usage' } & RuntimeUsageReport)
   | { type: 'completed' }
   | { type: 'failed'; error: RuntimeError }

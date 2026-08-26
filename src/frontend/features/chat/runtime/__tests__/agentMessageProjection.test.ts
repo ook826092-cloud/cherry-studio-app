@@ -13,6 +13,8 @@ function message(id: string, overrides: Partial<AgentMessageView> = {}): AgentMe
     turnId: 'turn-1',
     updatedAt: '2026-08-25T00:00:00.000Z',
     usage: null,
+    modelId: null,
+    inferenceSnapshot: null,
     ...overrides,
   };
 }
@@ -59,11 +61,13 @@ describe('agentMessageProjection', () => {
           { id: 'reasoning-1', state: 'streaming', text: 'Thinking', type: 'reasoning' },
           {
             approvalId: 'approval-1',
+            displayName: 'Read file',
             id: 'tool-1',
-            input: { path: '/tmp/a' },
+            input: { fileEntryId: 'file-1' },
+            providerName: 'builtin_read_file_a1b2',
             state: 'awaiting-approval',
             toolCallId: 'call-1',
-            toolName: 'read_file',
+            toolRef: { source: 'builtin', capabilityId: 'read_file' },
             type: 'tool',
           },
         ],
@@ -80,13 +84,87 @@ describe('agentMessageProjection', () => {
           {
             approval: { id: 'approval-1' },
             state: 'approval-requested',
+            title: 'Read file',
             toolCallId: 'call-1',
-            toolName: 'read_file',
+            toolName: 'builtin_read_file_a1b2',
             type: 'dynamic-tool',
           },
         ],
       },
     });
+  });
+
+  test('unwraps Runtime tool results for the shared tool renderers', () => {
+    const item = toAgentMessageListItem(
+      message('assistant-tool-result', {
+        parts: [
+          {
+            displayName: 'Write file',
+            id: 'tool-1',
+            input: { filename: 'report.md' },
+            output: {
+              value: { status: 'created', fileEntryId: 'file-1' },
+              artifacts: [
+                {
+                  ref: { kind: 'managed-file', fileEntryId: 'file-1' },
+                  mediaType: 'text/markdown',
+                  name: 'report.md',
+                  kind: 'created',
+                },
+              ],
+            },
+            providerName: 'write_file',
+            state: 'output-available',
+            toolCallId: 'call-1',
+            toolRef: { source: 'builtin', capabilityId: 'write_file' },
+            type: 'tool',
+          },
+        ],
+        status: 'success',
+      }),
+    );
+
+    expect(item).toMatchObject({
+      data: {
+        parts: [
+          {
+            output: { status: 'created', fileEntryId: 'file-1' },
+            toolName: 'write_file',
+            type: 'dynamic-tool',
+          },
+        ],
+      },
+    });
+  });
+
+  test('projects a managed file reference into the shared unavailable-aware renderer', () => {
+    const fileEntryId = '00000000-0000-7000-8000-000000000001';
+    const item = toAgentMessageListItem(
+      message('user-file', {
+        parts: [
+          {
+            fileEntryId,
+            id: 'input-0',
+            mediaType: 'image/png',
+            name: 'managed.png',
+            purpose: 'input-attachment',
+            type: 'file',
+          },
+        ],
+        role: 'user',
+        status: 'success',
+      }),
+    );
+
+    expect(item?.data.parts).toEqual([
+      expect.objectContaining({
+        filename: 'managed.png',
+        mediaType: 'image/png',
+        providerMetadata: { cherry: { fileEntryId } },
+        type: 'file',
+        url: `cherry://file/${fileEntryId}`,
+      }),
+    ]);
   });
 
   test('replaces persisted rows by id and appends only new live rows', () => {

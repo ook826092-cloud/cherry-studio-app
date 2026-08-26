@@ -1,16 +1,30 @@
+import type { RuntimeContextCheckpoint } from '@/backend/ai/agent';
 import type {
   AgentErrorView,
+  AgentInferenceSnapshotV1,
   AgentMessagePart,
   AgentMessageView,
   AgentSessionView,
   AgentUsageView,
 } from '@/shared/contracts/agent';
 
+export type StoredRuntimeContextCheckpoint = {
+  assistantMessageId: string;
+  checkpoint: unknown;
+};
+
 export type ReserveSubmissionResult = {
   /** Fresh correlation id shared by the reserved user/assistant pair. */
   turnId: string;
   userMessage: AgentMessageView;
   assistantMessage: AgentMessageView;
+};
+
+export type ReserveSubmissionInput = {
+  sessionId: string;
+  userParts: AgentMessagePart[];
+  modelId: AgentInferenceSnapshotV1['model']['uniqueModelId'];
+  inferenceSnapshot: AgentInferenceSnapshotV1;
 };
 
 export type FinalizeAssistantMessageInput = {
@@ -23,6 +37,8 @@ export type FinalizeAssistantMessageInput = {
    * (agent-persistence.md). It is not part of the message view.
    */
   error: AgentErrorView | null;
+  /** Saved only on a successfully completed assistant row. */
+  contextCheckpoint: RuntimeContextCheckpoint | null;
 };
 
 /**
@@ -51,12 +67,12 @@ export interface AgentSessionStore {
    * Atomically reserves the user message and assistant placeholder under a
    * fresh shared turnId before execution starts (protocol invariant 2).
    */
-  reserveSubmission(input: {
-    sessionId: string;
-    userParts: AgentMessagePart[];
-  }): Promise<ReserveSubmissionResult>;
+  reserveSubmission(input: ReserveSubmissionInput): Promise<ReserveSubmissionResult>;
 
   listMessages(sessionId: string): Promise<AgentMessageView[]>;
+
+  /** Returns the newest assistant row carrying an opaque checkpoint candidate. */
+  getLatestContextCheckpoint(sessionId: string): Promise<StoredRuntimeContextCheckpoint | null>;
 
   /**
    * Atomically settles the assistant message's terminal state before terminal

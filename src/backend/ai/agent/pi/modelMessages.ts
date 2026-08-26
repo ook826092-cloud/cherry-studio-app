@@ -1,9 +1,12 @@
 import type {
   Api as PiApi,
   AssistantMessage,
+  ImageContent,
   Message as PiMessage,
   Model as PiModel,
+  TextContent,
   ToolResultMessage,
+  UserMessage,
   Usage as PiUsage,
 } from '@earendil-works/pi-ai';
 
@@ -31,43 +34,68 @@ export function toPiConversation(
 ): PiConversation {
   const history: PiMessage[] = [];
   const systemParts = request.instructions.length > 0 ? [request.instructions] : [];
-  const toolNamesByCallId = collectToolNames(request);
+  const providerNamesByCallId = collectProviderNames(request);
 
-  for (const message of request.history) {
-    if (message.role === 'system') {
-      const text = collectText(message.parts);
-      if (text.length > 0) systemParts.push(text);
-      continue;
+  for (const turn of request.history) {
+    for (const message of turn.messages) {
+      if (message.role === 'system') {
+        const text = collectText(message.parts);
+        if (text.length > 0) systemParts.push(text);
+        continue;
+      }
+      if (message.role === 'user') {
+        history.push({
+          role: 'user',
+          content: collectUserContent(message.parts),
+          timestamp: Date.now(),
+        });
+        continue;
+      }
+      appendAssistantHistory(history, message.parts, providerNamesByCallId, model);
     }
-    if (message.role === 'user') {
-      history.push({ role: 'user', content: collectText(message.parts), timestamp: Date.now() });
-      continue;
-    }
-    appendAssistantHistory(history, message.parts, toolNamesByCallId, model);
   }
-
-  const promptText = request.input
-    .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-    .join('\n');
 
   return {
     history,
-    prompt: { role: 'user', content: promptText, timestamp: Date.now() },
+    prompt: { role: 'user', content: collectUserContent(request.input), timestamp: Date.now() },
     systemPrompt: systemParts.join('\n\n'),
   };
 }
 
-function collectToolNames(request: RuntimeExecutionRequest): Map<string, string> {
+function collectUserContent(parts: readonly RuntimeMessagePart[]): UserMessage['content'] {
+  const content = parts.flatMap<TextContent | ImageContent>((part) => {
+    if (part.type === 'text') {
+      return [{ type: 'text' as const, text: part.text }];
+    }
+    if (part.type === 'file') {
+      return [toPiImage(part)];
+    }
+    return [];
+  });
+  return content.some((part) => part.type === 'image') ? content : collectText(parts);
+}
+
+function toPiImage(part: Extract<RuntimeMessagePart, { type: 'file' }>): ImageContent {
+  const prefix = `data:${part.mediaType};base64,`;
+  if (!part.uri.startsWith(prefix) || part.uri.length === prefix.length) {
+    throw new Error('Runtime image content must be a matching base64 data URL.');
+  }
+  return { type: 'image', data: part.uri.slice(prefix.length), mimeType: part.mediaType };
+}
+
+function collectProviderNames(request: RuntimeExecutionRequest): Map<string, string> {
   const result = new Map<string, string>();
-  for (const message of request.history) {
-    for (const part of message.parts) {
-      if (part.type === 'tool-call') result.set(part.toolCallId, part.toolName);
+  for (const turn of request.history) {
+    for (const message of turn.messages) {
+      for (const part of message.parts) {
+        if (part.type === 'tool-call') result.set(part.toolCallId, part.providerName);
+      }
     }
   }
   return result;
 }
 
-function collectText(parts: RuntimeMessagePart[]): string {
+function collectText(parts: readonly RuntimeMessagePart[]): string {
   return parts
     .flatMap((part) => (part.type === 'text' || part.type === 'reasoning' ? [part.text] : []))
     .join('\n');
@@ -76,7 +104,7 @@ function collectText(parts: RuntimeMessagePart[]): string {
 function appendAssistantHistory(
   history: PiMessage[],
   parts: RuntimeMessagePart[],
-  toolNamesByCallId: Map<string, string>,
+  providerNamesByCallId: Map<string, string>,
   model: PiModel<PiApi>,
 ): void {
   let content: AssistantMessage['content'] = [];
@@ -108,7 +136,7 @@ function appendAssistantHistory(
         content.push({
           type: 'toolCall',
           id: part.toolCallId,
-          name: part.toolName,
+          name: part.providerName,
           arguments: part.input as Record<string, unknown>,
         });
         break;
@@ -117,7 +145,7 @@ function appendAssistantHistory(
         const result: ToolResultMessage<RuntimeJsonValue> = {
           role: 'toolResult',
           toolCallId: part.toolCallId,
-          toolName: toolNamesByCallId.get(part.toolCallId) ?? 'unknown',
+          toolName: providerNamesByCallId.get(part.toolCallId) ?? 'unknown',
           content: [{ type: 'text', text: JSON.stringify(part.output) }],
           details: part.output,
           isError: part.isError,
@@ -127,7 +155,7 @@ function appendAssistantHistory(
         break;
       }
       default:
-        // File parts are rejected before model resolution.
+        // Assistant artifact files are not implicit model attachments.
         break;
     }
   }
