@@ -13,12 +13,14 @@ import {
 import { AppState } from 'react-native';
 
 import { queryKeys, useBackendModule } from '@/frontend/data';
-import type { AgentInputPart } from '@/shared/contracts/agent';
+import type { AgentInputPart, AgentSubmitMessageInput } from '@/shared/contracts/agent';
 
 import { AgentSessionChatClient, type AgentSessionChatState } from './AgentSessionChatClient';
 
 type AgentChatSendInput = {
   agentId?: string;
+  modelId?: AgentSubmitMessageInput['modelId'];
+  reasoningEffort?: AgentSubmitMessageInput['reasoningEffort'];
   sessionId?: string;
   text: string;
 };
@@ -78,7 +80,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   useEffect(() => () => client.dispose(), [client]);
 
   const sendText = useCallback(
-    async ({ agentId, sessionId, text }: AgentChatSendInput) => {
+    async ({ agentId, modelId, reasoningEffort, sessionId, text }: AgentChatSendInput) => {
       let targetSessionId = sessionId;
       if (!targetSessionId) {
         if (!agentId) {
@@ -93,7 +95,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
       }
 
       const parts: AgentInputPart[] = [{ text, type: 'text' }];
-      await client.submitMessage(targetSessionId, parts);
+      await client.submitMessage(targetSessionId, parts, {
+        ...(modelId !== undefined ? { modelId } : {}),
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      });
     },
     [client, navigation, queryClient],
   );
@@ -109,9 +114,7 @@ function createChatNavigation(input: { pathname: string; router: ReturnType<type
     openSession: (sessionId: string, agentId: string) => {
       const params = {
         agentId,
-        assistantId: undefined,
         sessionId,
-        topicId: undefined,
       };
       if (navigation.pathname === '/') {
         navigation.router.setParams(params);
@@ -150,7 +153,8 @@ export function useAgentChatControls(input: { agentId?: string; sessionId?: stri
     return client.cancelTurn(sessionId);
   }, [client, sessionId]);
   const send = useCallback(
-    (text: string) => sendText({ agentId, sessionId, text }),
+    (message: Omit<AgentChatSendInput, 'agentId' | 'sessionId'>) =>
+      sendText({ agentId, sessionId, ...message }),
     [agentId, sendText, sessionId],
   );
 

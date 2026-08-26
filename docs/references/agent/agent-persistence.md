@@ -1,8 +1,7 @@
 # Agent Persistence
 
-Status: **schema, durable store, Agent CRUD, and static Session reads active in production**
-(`serviceRegistry` binds `SqliteAgentSessionStore`; step 6 follow-ups remain). Version 1 is
-local-only.
+Status: **schema, durable store, Agent CRUD, Session reads, and frontend integration active in
+production**. Version 1 is local-only.
 
 This document defines the durable SQLite schema behind the Host-owned
 [`AgentSessionStore`](../../../src/backend/ai/agentHost/AgentSessionStore.ts) port and the rollout
@@ -23,18 +22,17 @@ record for mobile-originated Agent Sessions only.
 - Agent CRUD plus cursor-paginated Session and transcript reads through the Data API, and an
   Agent-table-backed `AgentDefinitionSource` used by the production Host. Session renames and
   deletes delegate to the Host so an active turn is cancelled and drained before rows disappear.
-  The `agent` table intentionally starts empty; no assistant data is migrated or copied.
+  The `agent` table intentionally starts empty; retired Assistant data is discarded rather than
+  migrated.
 
-Out of scope: Agent UI, chat-table (`assistant`/`topic`/`message`) migration or removal, branching
-columns, background turns, and tool configuration storage. Everything here is additive; no
-existing table changes.
+Out of scope: branching columns, background turns, tool configuration storage, Mobile Skill
+configuration/loading, and broader Pi provider coverage. The retired `assistant`/`topic`/`message`
+tables were removed separately after Agent surfaces became authoritative. The current three-table
+schema must still be described as tool-less.
 
-## V0.2 transitional limitations
+## Current limitations
 
-V0.2 is an intentional integration transition. The Agent Data API and `Backend.agent` establish
-the storage and Host boundaries, but no frontend consumes them yet. The following limitations are
-accepted for V0.2 and must be resolved before an Agent UI or the Chat frontend switches to these
-surfaces:
+The Agent Data API, `Backend.agent`, and frontend surfaces share these current constraints:
 
 - Session observation currently resolves the live Agent definition first. Soft-deleting an Agent
   or clearing its model can therefore make its existing Sessions unavailable through the public
@@ -47,21 +45,25 @@ surfaces:
 
 ## Decisions
 
-**Parallel tables, not a rename.** Chat's `message` is a parent-linked tree with sibling groups
-and an active branch; an Agent Session transcript is linear ([Branching](./agent-protocol.md#branching)
-forks into a new Session instead). The models are not one-to-one, so chat tables stay untouched
-until Agent surfaces replace them and a migration is designed separately.
+**Agent tables were parallel first, then the old schema was dropped.** The retired `message` table
+was a parent-linked tree while an Agent Session transcript is linear
+([Branching](./agent-protocol.md#branching) forks into a new Session instead). Old data was
+deliberately discarded rather than converted between incompatible models.
 
 **No persisted Runtime identity.** There is no `runtime_binding` column. Runtime ids never appear in
 protocol values or application data ([Agent Runtime](./agent-runtime.md), protocol invariant 10).
 Version 1 has one execution target and one local engine: `local → Pi`. Application composition
 injects Pi directly into the Host, so there is no local implementation choice to persist.
 
-**No workspace, no resource scope yet.** A workspace concept encodes a working directory and a
-filesystem/shell execution environment; mobile has neither, so Sessions carry no workspace
-reference. `execution_target` carries application intent (`{"kind":"local"}` in V1). A
-capability-scoped resource concept (app sandbox, picked files) is deferred until a tool consumes
-it.
+**No workspace; controlled resources come from managed references.** A desktop workspace encodes a
+working directory and filesystem/shell execution environment; mobile has neither, so Sessions carry
+no workspace reference. `execution_target` carries application intent (`{"kind":"local"}` in V1).
+For Version 1, every file is imported into `file_entry` before submission or tool use. The Host
+initializes a turn resource ledger from managed file ids in the current input and Session transcript,
+then may add only validated entries created by application capabilities during that turn. Those
+durable references already live on messages, while the monotonic same-turn ledger is process-local,
+so no generic `resource_scope` column is added. A future broad Agent-to-library grant requires an
+explicit relation rather than a directory path or opaque JSON scope.
 
 **Turn is a projection, not a table.** Decomposed by requirement, a V1 Turn is three things and
 none of them needs a row of its own:
@@ -85,9 +87,11 @@ requirements, a turn (or execution) entity earns its table then.
 
 **Approvals are not persisted.** Sessions cannot resume: boot reconciliation interrupts every
 unfinished turn, so a persisted pending approval is dead on arrival. Pending approvals live in
-adapter memory (`upsertApproval` writes a process-local map); their durable outcome is already
-recorded in the `ToolPart` state (`awaiting-approval` → `output-available`/`denied`) committed
-when the assistant message settles. No `agent_approval` table.
+adapter memory. A user decision is recorded in the terminal ToolPart state and normalized output;
+denial becomes `denied`. Cancellation, failure, or startup reconciliation converts every remaining
+`input-available` / `awaiting-approval` / `running` ToolPart to `interrupted` before the assistant
+message settles. Later model history therefore contains paired calls/results and never replays an
+unanswerable approval. No `agent_approval` table.
 
 **Avatar is a stable file reference, not emoji and not `file_entry`.** Agent avatars follow the
 user-avatar pattern ([File Model](../data/file-model.md), `userAvatarStorage.ts`): processed to
@@ -103,16 +107,23 @@ installs a per-Session barrier, waits any already-admitted submission to install
 then cancels and drains that turn. New submissions fail closed until deletion finishes. Messages
 are never deleted individually in V1.
 
-**Deferred tool configuration.** The current foundation schema has no tool configuration and must
-not be described as tool-capable persistence. The direction is settled: tool references and
-per-tool approval policy are application-owned, and the Host resolves them into an immutable
-`RuntimeTool[]` snapshot for each turn. The exact storage shape lands with the tool model; Pi never
-owns or reads it directly.
+**Tool and Skill configuration has not migrated.** The current foundation schema has neither and
+must not be described as tool-capable persistence. Tool ownership and the logical binding direction
+are settled in
+[Agent Tools And Controlled Resources](./agent-tools-and-resources.md#tool-catalog-and-bindings).
+For Skills, only the ownership boundary is settled: the current Agent configuration selects the
+mobile-supported Skills available to its Sessions. The physical schema and loading behavior remain
+deferred. Desktop `agent_global_skill` / `agent_skill` metadata and relations must be retained for
+data parity without treating desktop Skill content as mobile-executable. Pi reads neither tool nor
+Skill persistence directly.
 
 **Naming and types.** DB columns use the protocol vocabulary (`title`, `titleIsManual`), not a
 second synonym set. Timestamps are integer epoch millis via `createUpdateDeleteTimestamps`; the
 store maps to the protocol's ISO strings at the boundary. `agent` uses UUID v4 (like `assistant`);
 `agent_session` and `agent_session_message` use time-ordered UUID v7 (`uuidPrimaryKeyOrdered`).
+Agent updates advance `updatedAt` with `max(previous + 1, wall clock)` inside the serialized write
+transaction. The composer can therefore use it as a strict row version when reconciling optimistic
+model selection with settings edits and inactive query caches.
 
 **Desktop divergence is documented.** Mobile shares the desktop table names and the
 `agent → agent_session → agent_session_message` shape but owns its columns, per the #568
@@ -231,20 +242,23 @@ storage boundary moves.
    and bind it as the production `AgentSessionStore` in `serviceRegistry` (done — the in-memory
    adapter remains the conformance reference).
 4. **Agent rows.** Expose Agent CRUD through the Data API and use the `agent`-table-backed
-   `AgentDefinitionSource` in the production Host (done). The table starts empty and assistant data
-   is not copied; assistants remain authoritative only for the current Chat surface until its
-   replacement lands.
+   `AgentDefinitionSource` in the production Host (done). The table starts empty and retired
+   Assistant data is not copied.
 5. **Session reads.** Expose recency-ordered Session lists and cursor-paginated linear transcript
    history through the Data API. Keep these historical reads independent of executable Agent
    lookup, and route Session rename/delete through the Host lifecycle boundary (done).
-6. **Follow-ups (separate designs).** Agent UI consuming `Backend.agent`; avatar workflow
-   (generalizing `userAvatarStorage`); tool configuration; fork columns; the eventual chat-table
-   decision.
+6. **Frontend and retirement.** Agent UI consumes `Backend.agent`; the incompatible legacy Chat
+   tables/runtime are removed without data conversion (done).
+7. **Follow-ups (separate implementation slices).** Avatar workflow (generalizing
+   `userAvatarStorage`), tool/Skill binding persistence, managed attachment and artifact
+   projection, fork columns, context compaction, and broader Pi provider coverage.
 
 ## Rejected alternatives
 
 - `runtime_binding` column — Version 1 has one local engine and no local implementation choice.
-- `resource_scope` column — nothing consumes it; add with the first scoped tool.
+- Generic `resource_scope` column — Version 1 file authority derives from explicit managed file refs
+  already persisted in input and transcript parts plus the process-local monotonic turn ledger. A
+  later broad library grant needs a normalized Agent-to-file relation, not an opaque scope blob.
 - `agent_turn` table — kept in an earlier draft to avoid reshaping the already-implemented store
   port, i.e. fitting the schema to the code. By requirement, every durable turn fact lives on the
   assistant message and every live turn state is process-local; with zero consumers of

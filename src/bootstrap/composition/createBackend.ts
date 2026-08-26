@@ -107,11 +107,12 @@ export function createBackend(
   return {
     backend: {
       agent: services.agent,
-      chat: services.chat,
       file: {
         createInternalEntry: services.fileContent.createInternalEntry,
         delete: services.fileContent.delete,
+        generatePreviewUri: services.fileContent.generatePreviewUri,
         getUri: services.fileContent.getUri,
+        resolveUris: services.fileContent.resolveUris,
       },
       mcp: services.mcpRuntime,
       models,

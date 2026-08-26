@@ -15,8 +15,8 @@ Use these roles for mobile-owned code:
 
 | Role | Use when the type is | Example |
 | --- | --- | --- |
-| `Module` | A frontend-visible workflow capability exposed through `Backend` | `ChatModule` |
-| `Runtime` | One app- or bootstrap-owned executor whose state spans calls or routes | `ChatRuntime` |
+| `Module` | A frontend-visible workflow capability exposed through `Backend` | `PaintingsModule` |
+| `Runtime` | One app- or bootstrap-owned executor whose state spans calls or routes | `JobRuntime` |
 | `Session` | One caller-owned isolated unit with explicit cancellation or disposal | `PaintingGenerationSession` |
 | `Client` | A boundary to one external account, protocol, or remote API | `VertexAuthClient` |
 | `Adapter` | A translation boundary for a platform or SDK; a precise capability noun may stand alone | `DevicePermissions` |
@@ -100,8 +100,27 @@ tracked turns before lower-level infrastructure closes. OS suspension or termina
 guarantee continued execution or resumable streaming; the next process start marks unfinished local
 turns interrupted.
 
-The legacy `ChatRuntime` and `Backend.chat` remain registered until the migration's schema/runtime
-removal stage, but the primary chat route no longer consumes them.
+## Agent Tool Capabilities
+
+When application tools land, the Agent Host additionally owns current Agent Skill resolution, the
+monotonic turn resource ledger, immutable per-turn tool snapshots, tool terminalization, and
+artifact projection. Skill loading details remain deferred; the ownership split below is settled
+design, and Version 1 still resolves an empty tool snapshot.
+
+Pi owns model context construction and the model → tool → result loop. It does not own system
+permissions, provider credentials, managed files, MCP clients, or side-effect policy. Each
+application capability adapter owns one narrow operation and its validation, timeout, cancellation,
+cleanup, and error redaction:
+
+- `McpRuntimeService` owns Streamable HTTP clients and discovery caches;
+- device adapters own calendar permission and native calls;
+- Office and file adapters own temporary bytes and copy-on-write `file_entry` creation; and
+- the image capability owns `AiService`/AI SDK execution, usage, downloads, and managed output
+  import.
+
+An Agent tool may delegate to `JobRuntime`, but Version 1 still waits for terminal job state inside
+the active turn. The durable job ledger does not make the Agent turn resumable after process death.
+See [Agent Tools And Controlled Resources](./agent/agent-tools-and-resources.md).
 
 ## Painting Generation
 
@@ -131,10 +150,10 @@ painting through any Data API caller first fences its scope and drains the job.
 then applies the frontend theme and initializes i18n. It must not refresh catalogs, prefetch history,
 repair data, or run diagnostics.
 
-`runPostReadyTasks()` starts after status becomes `ready`. It repairs crash-orphaned pending
-assistant messages while the host's PostReady phase prewarms MCP and starts the job cold-start pump.
-Both are off the first-paint path. Host-owned PostReady initialization is retained and awaited if
-that generation is disposed before it finishes.
+The bootstrap runtime's `runPostReadyTasks()` starts the host PostReady phase after status becomes
+`ready`. Agent reconciliation, MCP initialization, and the job cold-start pump stay off the
+first-paint path. Host-owned PostReady initialization is retained and awaited if that generation is
+disposed before it finishes.
 
 Current Agent Session, transcript history windows, provider queries, and feature state load at route
 level after the bootstrap gate.
@@ -144,7 +163,8 @@ level after the bootstrap gate.
 - App bootstrap unmount closes SQLite and disposes long-lived backend resources.
 - Route unmount only unsubscribes from Agent Session observations; it does not cancel active turns.
 - App disposal closes Agent Runtime sessions and awaits tracked Agent turns before closing
-  infrastructure.
+  infrastructure, including the MCP, device, provider, and file capability dependencies tools rely
+  on.
 - Painting route unmount does not stop generation; explicit cancel or resource deletion reaches the
   host-owned job runtime.
 - Cold start does not wait for non-current history, provider/model refresh, or diagnostics.

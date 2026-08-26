@@ -9,15 +9,15 @@ here. Terms follow [Domain Language](../domain-language.md).
 
 ## Invariants
 
-1. **Files are first-class.** A file is a peer of the message or painting that uses it, not a
+1. **Files are first-class.** A file is a peer of the Agent message or painting that uses it, not a
    dependent of it. Every entry belongs in the future file library.
 2. **Content is immutable.** Bytes never change after creation. Any "edit" creates a new entry
    (copy-on-write); nothing in the app rewrites a managed blob in place.
 3. **Cherry owns every blob.** Picker, camera, and provider URIs are transient import sources whose
    bytes are copied into `Data/Files`. No entry references a path outside the sandbox.
-4. **Import happens when the file enters the app.** The composer imports at pick time (the upload
-   affordance tells the user the file is stored), painting imports at generation time.
-5. **Business-object deletion never deletes files.** Deleting a topic, message, or painting leaves
+4. **Import happens when the file enters the app.** Painting imports at generation time; Agent
+   attachment import remains deferred until the Host file resolver exists.
+5. **Business-object deletion never deletes files.** Deleting an Agent Session or painting leaves
    every file it pointed at in place.
 6. **Only the user deletes files.** Two paths exist: cancelling an attachment before send, and (once
    the file library ships) library deletion. There is no background garbage collection.
@@ -55,8 +55,9 @@ An owner stores the entry ids it points at, inside its own row:
 
 | Owner | Where the ids live |
 | --- | --- |
-| Chat message | `message.data` JSON — `fileEntryId` in each file part's Cherry metadata |
 | Painting | `painting.files` — `{ input: string[], output: string[] }` |
+
+Agent Session attachments are not active in Version 1, so no current transcript row owns file ids.
 
 There is no association table and no foreign key from an owner to `file_entry`. That is the point:
 a foreign key would have to choose between `CASCADE` (deleting a file silently rewrites the
@@ -66,13 +67,13 @@ placeholder. Writers validate ids against `file_entry` at write time (`assertFil
 for paintings), which catches the mistake that actually happens: pointing at an entry that was
 never created.
 
-## Message persistence
+## Future Agent Attachment Persistence
 
-A persisted file part stores `url: "cherry://file/{id}"` plus `fileEntryId` in its Cherry metadata —
-never an absolute sandbox path, which iOS invalidates on container relocation. Consumers resolve the
-id to a device URI at read time (`FileEntryPreview` for rendering, `fileProcessor` for AI requests).
-A bare `file://` / `content://` URL is only accepted for a part that carries no id, i.e. one that has
-not been imported yet.
+A future persisted Agent file part stores `fileEntryId` plus stable display metadata such as name
+and media type — never an absolute sandbox path, which iOS invalidates on container relocation. The
+Host-side resolver must resolve that id for provider input. If the entry or its bytes are gone, the
+part remains in history and renders unavailable. Until that contract lands, Agent Protocol reports
+`attachments: false` and rejects attachments before execution.
 
 Attachments are sent to providers as inlined base64 data URLs. The provider upload cache is deferred
 until the AI SDK's Files Upload API leaves pre-release; its content hash belongs to that cache table,
@@ -107,16 +108,30 @@ logos are similarly external (`{documentDirectory}/provider-avatars/`, resolved 
 the reserved `deletedAt`: delete sets it, restore clears it, emptying the trash hard-deletes rows and
 bytes, and other surfaces then show the unavailable placeholder. There is no retention timer —
 trashed files persist until the user empties the trash. Deleting is deliberately unguarded: no
-"used by 2 topics" warning, because that would need the reverse index this model does without, and
+"used by 2 Sessions" warning, because that would need the reverse index this model does without, and
 the user owns the consequences of their own deletion. The same iteration owns a cache-cleanup
 action, which is also where orphan-blob sweeping belongs (blobs in `Data/Files` with no matching
 row).
 
-**Agent file writes.** A write tool reads the current entry, creates a new one, and returns the new
-id; it must not rewrite a managed blob. Agent-owned files are stored the way every other owner
-stores them — ids on the owning row — not in an association table. A file id sitting in a
-tool-result JSON payload is not ownership: it has to reach a row that outlives the turn, or the
-file has no owner at all.
+**Agent file writes and generated artifacts.** A write tool reads an entry in the turn's controlled
+resource ledger, creates a new one, and returns the new id; it must not rewrite a managed blob.
+Office inputs are imported before inspection or editing, and every edit patches a copy into a new
+entry while preserving the source. Office and image tools follow the same rule for newly generated
+output. The file library is also the Version 1 artifact library; no parallel artifact blob store or
+external authoritative path exists. Raw picker, provider, and device URIs are transient import
+sources; Agent protocol and tools receive only managed ids.
+
+The Runtime projects each result into an assistant-message file part containing its `fileEntryId`
+and `purpose: 'artifact'`, because a file id sitting only in tool-result JSON is not transcript
+ownership. That reference remains available to UI and, while the managed entry exists, controlled
+tools, but is not automatically sent to the model as a file attachment in later history. The
+originating paired tool result retains bounded reference metadata without inlining its content.
+Explicit user attachment produces an `input-attachment` part for the same entry; controlled
+inspection and read tools can also consume it by id. See
+[Agent Tools And Controlled Resources](../agent/agent-tools-and-resources.md#tool-results-and-artifacts).
+
+Saving or sharing a managed artifact to the system copies its bytes to a user-selected destination.
+The managed entry remains canonical, and Cherry never persists the exported path as file authority.
 
 **Provider upload cache.** A separate table keyed by content hash, added when the AI SDK's Files
 Upload API stabilizes.
