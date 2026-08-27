@@ -1,7 +1,6 @@
 # Cherry Agent Runtime
 
-Status: **Pi Runtime, executable Streamable HTTP MCP tools, bounded managed image/text input, and
-Pi context compaction are active behind the Mobile Agent Host**. Version 1 is local-only.
+> Status: as-built. Version 1 is local-only.
 
 The Agent Runtime is the independent execution boundary behind the Mobile Agent Host. Pi is the
 only local implementation. AI SDK may remain an implementation detail of non-conversation
@@ -36,10 +35,10 @@ directly into the Host. There is no Runtime registry, no implementation-selectio
 persisted Runtime binding. Agent configuration, Session configuration, model selection, and tool
 availability never select another local engine.
 
-The Agent's application-owned instructions, model, tools, and enabled Mobile Skills are resolved
-afresh for every turn. The Host prepares instruction context from only the Skills selected by the
-current Agent configuration. A Skill is never itself a tool; its exact loading and history behavior
-remain deferred. The injected Pi Runtime remains stable for the Host lifetime.
+The Agent's instructions, model, and MCP bindings, plus application-owned system capabilities, are
+resolved afresh for every turn. Mobile Skill persistence and prompt projection are not implemented;
+their target boundary is documented separately and does not change the current Runtime input. The
+injected Pi Runtime remains stable for the Host lifetime.
 
 ## Production Pi binding
 
@@ -49,13 +48,13 @@ services. Current provider coverage includes API-key-authenticated Anthropic Mes
 Generate Content, OpenAI Chat Completions, and OpenAI Responses endpoints. Unsupported endpoint,
 non-standard adapter family, or authentication types fail before partial execution.
 
-Pi receives the grouped structured transcript, an optional opaque context checkpoint, a frozen MCP
-tool catalog, and Agent inference options on each execution. It maps text, reasoning, tool parts,
+Pi receives the grouped structured transcript, an optional opaque context checkpoint, a frozen tool
+catalog, and Agent inference options on each execution. It maps text, reasoning, tool parts,
 approvals, cancellation, normalized failures, and cumulative multi-call usage onto this contract.
-The Host resolves persisted bindings and currently executable MCP descriptors before reservation,
-alongside the fixed application-owned catalog. It also resolves bounded managed images for
-registry-declared image-capable models supported by the selected Pi endpoint adapter, plus bounded
-UTF-8 managed text as untrusted user content.
+Before reservation, the Host combines the shared system catalog and this submission's temporary
+capabilities with the Agent's persisted, currently executable MCP bindings. It also resolves bounded
+managed images for registry-declared image-capable models supported by the selected Pi endpoint
+adapter, plus bounded UTF-8 managed text as untrusted user content.
 
 The repository patches expose `pi-agent-core/compaction` and its exact RN-safe Pi AI utility
 subpaths. Short conversations retain the complete-history path. Long conversations reuse or
@@ -101,9 +100,9 @@ credentials, endpoints, and headers remain private to the Runtime adapter. Pi pr
 model resolution read the same mobile model/provider services and enforce the same endpoint rules.
 
 Capabilities describe what the engine contract can represent. In particular, `tools: true` means
-Pi can run a tool loop; it does not mean the current Agent has any tools configured. The Host derives
-the effective tools for each turn, and the Pi model adapter separately checks whether the selected
-model supports native tool calling.
+Pi can run a tool loop; it does not mean any effective tool will enter the turn. The Host derives
+the effective tools from system and Agent-owned inputs, and the Pi model adapter separately checks
+whether the selected model supports native tool calling.
 
 The Host owns one `AgentRuntimeSession` for each active application Session. The Runtime session may
 hold provider clients and execution-local state, but every `execute` request contains the complete
@@ -189,8 +188,9 @@ implementations therefore receive only an executable effort level.
 
 File input is resolved by the Host before it reaches a Runtime: attachments enter the application's
 file storage first, `AgentInputPart` carries the resulting `fileEntryId`, and the Host validates the
-live entry and managed blob before message reservation. The Host has a process-local ledger of the
-managed ids referenced by the current input and visible history. A Runtime never reads the device
+live entry and managed blob before message reservation. The Host authorizes tools from managed ids
+referenced by the current input and complete Session transcript, while it resolves attachment
+content only for the current input and checkpoint-visible history. A Runtime never reads the device
 filesystem. For supported images, the Host enforces the shared JPEG/PNG/GIF/WebP whitelist plus
 at most 9 images, 10 MiB per file, 20 MiB total, and a conservative context reserve of 4,096 input
 tokens per image plus 1,024 tokens for text. This remains the Host's current-input admission ceiling;
@@ -306,15 +306,16 @@ type RuntimeTool = {
 }
 ```
 
-`ref` is the stable application identity used by binding, approval, persistence, and audit.
+`ref` is the stable application identity used by approval and audit, and by MCP persistence.
 `providerName` is only the deterministic function alias exposed to the model for this contract;
 `displayName` is a historical UI snapshot. `inputSchema` is portable JSON Schema, not a
 provider-native schema object.
 
-The Host supplies an immutable tool snapshot after applying current Agent configuration, platform
-availability, system permissions, and Agent policy. Configuration changes during execution apply to
-the next turn, not the active one. A Runtime validates tool input, enforces the approval mode, and
-invokes `execute` only after approval when the mode is `ask`.
+The Host supplies an immutable tool snapshot after applying the system catalog, temporary composer
+selection, current Agent MCP configuration, platform availability, system permissions, and
+application policy. Changes during execution apply to the next turn, not the active one. A Runtime
+validates tool input, enforces the approval mode, and invokes `execute` only after approval when the
+mode is `ask`.
 
 `tools: []` is a complete and valid request: Pi performs ordinary conversation and the Host must not
 leave stale tool instructions in the prompt. A non-empty snapshot enables Pi's model → tool → result
@@ -348,10 +349,11 @@ Tool callbacks and `AbortSignal` are allowed here because the Runtime contract i
 They never cross the JSON-safe application protocol.
 
 A callback may close over a narrow application capability service. This is how Streamable HTTP MCP,
-calendar, Office generation, image generation, and managed-file operations reach Pi without Pi
+device capabilities, web access, image generation, and managed-file operations reach Pi without Pi
 importing application or provider SDK modules. Image generation may use `AiService`,
 `@cherrystudio/ai-core`, or AI SDK behind that callback; those dependencies still do not own the
-conversation or tool loop.
+conversation or tool loop. The current inventory lives in
+[Agent Tools And Controlled Resources](./agent-tools-and-resources.md).
 
 Every callback returns `RuntimeToolResult`. A non-artifact tool returns `artifacts: []`; an MCP
 adapter wraps the remote payload in `value` and never interprets its shape as an artifact envelope.
@@ -363,10 +365,9 @@ later model attachments. See
 [Agent Tools And Controlled Resources](./agent-tools-and-resources.md#tool-results-and-artifacts).
 Absolute paths and large base64 payloads are never tool results.
 
-Mobile Skills are resolved by the Host from the current Agent configuration. They never become
-executable capabilities and cannot change the tool snapshot, approval policy, OS permission, or
-turn resource ledger. Their eventual loading and prompt projection are defined with implementation.
-See [Agent Skills](./agent-skills.md).
+Mobile Skills are not resolved by the current Host. Their target contract keeps them as instruction
+context that cannot change the tool snapshot, approval policy, OS permission, or turn resource
+ledger. See [Agent Skills](./agent-skills.md).
 
 ## Execution output
 
@@ -496,17 +497,21 @@ Runtime that cannot report usage emits no `usage` event, and the assistant messa
 
 1. The Host validates that the Session is idle.
 2. It validates that the Session target is `local`, resolves the current Agent, public model facts,
-   input and history, then creates the turn resource ledger.
+   the latest checkpoint candidate, its Store-loaded history tail, and lightweight authorization
+   indexes, then creates the turn resource ledger. Invalid candidates load the full history.
 3. It freezes the immutable tool catalog against that ledger and builds the versioned,
    credential-free inference snapshot from the same model, options, and tools sent to the Runtime.
-4. It preflights attachments, then atomically persists the user message and assistant placeholder
-   with the selected model id and inference snapshot.
-5. The Host uses its injected Pi Runtime, loads the latest valid context checkpoint, and normalizes
-   instructions, model, grouped structured history after its anchor, the immutable tool snapshot,
-   input, and options. Invalid candidates fall back to the full history.
+4. It preflights attachments and opens the injected Pi Runtime Session. Only after that succeeds
+   does it atomically persist the user message and assistant placeholder with the selected model id
+   and inference snapshot.
+5. The Host normalizes instructions, model, grouped structured history after the checkpoint anchor,
+   the immutable tool snapshot, input, and options.
 6. The selected Runtime executes the prepared request.
 7. The Host maps Runtime parts, approvals, usage, and terminal events into Agent Protocol state.
-8. Terminal message and turn state commit before the Host publishes terminal protocol events.
+8. Terminal message and turn state commit before the Host publishes terminal protocol events. A
+   transient terminal-write failure retries the same outcome; a persistently unwritable store makes
+   that Host generation reject new submissions and leaves startup reconciliation to settle the
+   durable placeholder.
 
 The Runtime never writes application storage. The Host never interprets Pi-native events outside
 the Pi implementation.
@@ -515,6 +520,10 @@ the Pi implementation.
 
 Route unmount does not own or cancel execution; the app-owned Host and Runtime session do. A
 foreground transition creates a fresh protocol observation from the Host snapshot.
+
+Host shutdown closes submission admission before aborting both in-flight admission work and active
+turns. Attachment reads and automatic naming generation inherit the same lifecycle cancellation
+boundary; shutdown joins admissions before closing Runtime Sessions.
 
 Local execution depends on the Mobile JavaScript process. If the process is suspended or killed and
 the turn cannot reach a terminal event, startup reconciliation marks the persisted placeholder and
