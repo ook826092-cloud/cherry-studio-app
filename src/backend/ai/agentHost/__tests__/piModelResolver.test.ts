@@ -3,6 +3,7 @@ import {
   MODEL_CAPABILITY,
   type EndpointType,
 } from '@cherrystudio/provider-registry';
+import { fetch as expoFetch } from 'expo/fetch';
 
 import type { PiRuntimeDependencies } from '@/backend/ai/agent';
 import type { Model } from '@/shared/data/types/model';
@@ -209,6 +210,26 @@ describe('Pi model resolver', () => {
     });
   });
 
+  test('composes the shared Provider language transport over Expo fetch', async () => {
+    const provider = makeProvider(
+      ENDPOINT_TYPE.OPENAI_CHAT_COMPLETIONS,
+      'https://api.cherry-ai.com',
+      'openai-compatible',
+    );
+    provider.id = 'cherryai';
+    provider.presetProviderId = 'cherryai';
+    const model = makeModel(ENDPOINT_TYPE.OPENAI_CHAT_COMPLETIONS, {
+      id: 'cherryai::test-model',
+      providerId: 'cherryai',
+    });
+    mockGetProviderById.mockResolvedValue(provider);
+    mockGetModelById.mockResolvedValue(model);
+
+    await resolver.resolveModel({ modelId: 'test-model', providerId: 'cherryai' }, {});
+
+    expect(mockBindPiStream.mock.calls[0]?.[1].fetch).not.toBe(expoFetch);
+  });
+
   test.each([
     {
       name: 'an unsupported endpoint',
@@ -260,7 +281,12 @@ describe('Pi model resolver', () => {
       value: '',
     });
 
-    await expect(resolve(resolver)).rejects.toThrow('requires an API key');
+    await expect(resolve(resolver)).rejects.toMatchObject({
+      code: 'invalid_api_key',
+      message: expect.stringContaining('requires an API key'),
+      name: 'PiModelResolutionError',
+      retryable: false,
+    });
     expect(mockBindPiStream).not.toHaveBeenCalled();
   });
 });

@@ -30,6 +30,7 @@ They are the source of truth for how the repository works today.
 | [Runtime Ownership](./references/runtime-ownership.md) | Bootstrap, app runtimes, caller-owned sessions, cleanup, and post-ready work |
 | [Universal Package](./references/universal-package.md) | `@cherrystudio/universal` scope, admission criteria, aliasing, and desktop sync |
 | [Navigation And Insets](./references/navigation-and-insets.md) | Router structure, native gestures, sheets, safe areas, and edge-to-edge layout |
+| [Interaction And Gesture Arbitration](./references/interaction-and-gesture-arbitration.md) | Target contract for tap, long press, scroll, app-defined pan, and native text selection (`Status: design`) |
 | [Splash Screen And Startup Animation](./references/splash-screen-and-startup-animation.md) | Native launch constraints, animated handoff, and onboarding boundaries |
 | [UI Components](./references/ui-components.md) | Interaction component ownership and platform enhancement rules |
 | [Expo UI Bottom Sheet Navigation](./references/expo-ui-bottom-sheet-navigation.md) | Sheet page transitions, physical stacking, and platform constraints |
@@ -41,6 +42,7 @@ They are the source of truth for how the repository works today.
 | --- | --- |
 | [Agent Architecture](./references/agent/README.md) | Implemented Agent Host foundation and Pi-first local execution target design |
 | [AI Provider Integration](./references/ai/provider-integration.md) | Pi Agent provider resolution and non-conversation AI SDK generation |
+| [Provider Serving Boundaries](./references/ai/provider-serving-boundaries.md) | Shared Provider connection facts and capability-specific language and image execution boundaries |
 | [Chat Streaming And Rendering](./references/chat/streaming-and-rendering.md) | Chat Runtime streaming, message windows, persistence, and rendering boundaries |
 | [Data Layer](./references/data/README.md) | Data API, preferences, caches, SQLite ownership, and service composition |
 | [File Model](./references/data/file-model.md) | Sandbox file ownership, immutability, references, lifecycle, and user-triggered deletion |
