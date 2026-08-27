@@ -27,6 +27,8 @@
  *     stays private to the Host.
  */
 
+import { unsupportedMediaNote } from '@cherrystudio/ai-runtime/messages';
+
 import type { AiService } from '@/backend/ai/AiService';
 import type { McpRuntimeService } from '@/backend/ai/mcp';
 import {
@@ -150,6 +152,7 @@ const NOOP_BACKGROUND_REPLY_TURN: BackgroundReplyTurn = {
 };
 
 const TERMINAL_PERSISTENCE_RETRY_DELAYS_MS = [0, 50, 200] as const;
+const NO_IMAGE_MEDIA_CAPABILITIES = { image: false, video: true, audio: true } as const;
 
 type MobileAgentHostOverrides = {
   agents: AgentDefinitionSource;
@@ -518,7 +521,10 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
           fail('EXECUTION_UNAVAILABLE', 'The configured Agent tools are unavailable.');
         }
       }
-      const tools = [...systemTools, ...configuredTools];
+      const tools = applyAgentToolApprovalMode(
+        [...systemTools, ...configuredTools],
+        agent.toolApprovalMode,
+      );
       let inferenceModel: Awaited<ReturnType<AgentInferenceModelResolver>>;
       try {
         inferenceModel = await raceAbort(this.inferenceModel(agent.model), signal);
@@ -627,6 +633,7 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
         parts,
         runtimeContextCheckpoint,
         runtimeTextAttachments,
+        modelPreflight,
         tools,
       );
       this.runningTurns.add(run);
@@ -731,16 +738,35 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
     inputParts: AgentInputPart[],
     storedContextCheckpoint: RuntimeContextCheckpoint | null,
     runtimeTextAttachments: RuntimeAttachmentContents,
+    modelPreflight: RuntimeModelPreflight,
     tools: readonly RuntimeTool[],
   ): Promise<void> {
     try {
       const runtimeAttachments = new Map(runtimeTextAttachments);
-      const runtimeImages = await this.resolveRuntimeImages(
-        state.resources,
-        state.abortController.signal,
-      );
-      for (const [fileEntryId, image] of runtimeImages) {
-        runtimeAttachments.set(fileEntryId, image);
+      if (modelPreflight.inputModalities.includes('image')) {
+        const runtimeImages = await this.resolveRuntimeImages(
+          state.resources,
+          state.abortController.signal,
+        );
+        for (const [fileEntryId, image] of runtimeImages) {
+          runtimeAttachments.set(fileEntryId, image);
+        }
+      } else {
+        const omitImage = (fileEntryId: string, mediaType: string) => {
+          const text = unsupportedMediaNote(mediaType, NO_IMAGE_MEDIA_CAPABILITIES);
+          if (text) runtimeAttachments.set(fileEntryId, { type: 'text', text });
+        };
+        for (const part of inputParts) {
+          if (part.type === 'file') omitImage(part.fileEntryId, part.mediaType);
+        }
+        for (const message of history) {
+          if (message.role !== 'user') continue;
+          for (const part of message.parts) {
+            if (part.type === 'file' && part.purpose === 'input-attachment') {
+              omitImage(part.fileEntryId, part.mediaType);
+            }
+          }
+        }
       }
       state.abortController.signal.throwIfAborted();
       const events = state.runtimeSession.execute({
@@ -1181,7 +1207,8 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
       return;
     }
     if (!model.inputModalities.includes('image')) {
-      fail('CAPABILITY_UNSUPPORTED', 'The selected model does not support image input.');
+      // runTurn replaces these references with text notes without reading image bytes.
+      return;
     }
 
     const limit = findImageAttachmentLimit(images, model);
@@ -1416,6 +1443,24 @@ function applyTurnOverrides(
     ...(input.modelId ? { model: parseUniqueModelId(input.modelId) } : {}),
     options,
   };
+}
+
+/**
+ * Applies only the Agent's interactive approval preference. Tool availability,
+ * hard denies, system permission, and callback-level resource checks are left
+ * untouched and continue to fail closed.
+ */
+function applyAgentToolApprovalMode(
+  tools: readonly RuntimeTool[],
+  mode: AgentDefinition['toolApprovalMode'],
+): RuntimeTool[] {
+  if (mode === 'default') {
+    return [...tools];
+  }
+
+  return tools.map((tool) =>
+    tool.approval === 'ask' ? { ...tool, approval: 'auto' as const } : tool,
+  );
 }
 
 function imageAttachmentLimitMessage(limit: ImageAttachmentLimit): string {
