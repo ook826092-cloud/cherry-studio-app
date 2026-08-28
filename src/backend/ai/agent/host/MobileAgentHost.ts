@@ -8,6 +8,14 @@
  * lifecycle service (one per ApplicationHost generation):
  * route unmount only unsubscribes; disposal cancels and awaits active turns.
  *
+ * The write-free stretch between admission and the first durable row lives in
+ * `./turnPreparation` (gates and the frozen `TurnPlan`); attachment admission
+ * and materialization live in `./turnAttachments`. The two adaptation
+ * directions are separate modules: `./turnRuntimeInput` assembles the Runtime
+ * request, `./runtimeProjection` projects Runtime output back onto the
+ * protocol. This class keeps admission, reservation, execution, and terminal
+ * settlement.
+ *
  * Protocol invariants implemented here (agent-protocol.md):
  * 1.  one active turn per Session (synchronous admission guard);
  * 2.  reservation of user message + assistant placeholder commits atomically
@@ -26,8 +34,6 @@
  * 10. clients supply an execution target and Agent id; the local Pi binding
  *     stays private to the Host.
  */
-
-import { unsupportedMediaNote } from '@cherrystudio/ai-runtime/messages';
 
 import type { AiService } from '@/backend/ai/AiService';
 import type { McpRuntimeService } from '@/backend/ai/mcp';
@@ -72,35 +78,20 @@ import {
   type AgentTurnView,
 } from '@/shared/contracts/agent';
 import { loggerService } from '@/shared/core/logger/LoggerService';
-import { FileEntryIdSchema } from '@/shared/data/types/file';
-import { parseUniqueModelId } from '@/shared/data/types/model';
-import { isAiSupportedImageMediaType } from '@/shared/utils/imageFileTypes';
 
-import { createPiModelResolver } from '../piAdapter/piModelResolver';
-import { findImageAttachmentLimit, type ImageAttachmentLimit } from '../resources/imageAttachments';
 import {
-  createTurnResourceLedger,
   managedFileResolver,
-  type ManagedFileFact,
   type ManagedFileResolver,
   type TurnResourceLedger,
 } from '../resources/managedFileResolver';
-import {
-  isSupportedTextAttachment,
-  resolveManagedTextAttachments,
-  TextAttachmentError,
-} from '../resources/textAttachments';
 import type {
   AgentRuntime,
   AgentRuntimeSession,
   RuntimeContextCheckpoint,
   RuntimeEvent,
-  RuntimeInputPart,
-  RuntimeModelPreflight,
-  RuntimeTool,
   RuntimeUsageReport,
 } from '../runtime';
-import { PiRuntime, raceAbort } from '../runtime';
+import { raceAbort } from '../runtime';
 import type { AgentSessionStore } from '../sessionStore/AgentSessionStore';
 import { interruptNonTerminalToolParts } from '../sessionStore/messageSettlement';
 import {
@@ -118,24 +109,17 @@ import {
 } from './agentDefinitions';
 import { AgentSessionNaming } from './AgentSessionNaming';
 import { AgentSessionUsageRecorder } from './AgentSessionUsageRecorder';
-import {
-  validateRuntimeContextCheckpoint,
-  validateRuntimeContextCheckpointCandidate,
-} from './contextCheckpoints';
-import {
-  createAgentInferenceSnapshot,
-  type AgentInferenceModelResolver,
-  resolveAgentInferenceModel,
-} from './inferenceSnapshot';
+import { validateRuntimeContextCheckpoint } from './contextCheckpoints';
+import { type AgentInferenceModelResolver, resolveAgentInferenceModel } from './inferenceSnapshot';
 import {
   toAgentApprovalView,
   toAgentErrorView,
   toAgentMessagePart,
   toAgentUsageView,
-  toRuntimeHistory,
-  toRuntimeInputParts,
-  type RuntimeAttachmentContents,
-} from './mapping';
+} from './runtimeProjection';
+import { materializeRuntimeAttachments } from './turnAttachments';
+import { prepareTurn, type TurnPlan, type TurnPreparationDependencies } from './turnPreparation';
+import { toRuntimeHistory, toRuntimeInputParts } from './turnRuntimeInput';
 
 const logger = loggerService.withContext('MobileAgentHost');
 
@@ -151,8 +135,20 @@ const NOOP_BACKGROUND_REPLY_TURN: BackgroundReplyTurn = {
   update: () => {},
 };
 
+/**
+ * Runtime events after which the background-reply surface must re-read the
+ * assistant message. Declaring the set here rather than notifying inside each
+ * branch means a newly handled event cannot silently stop refreshing the live
+ * notification — a drift no test would catch.
+ */
+const MESSAGE_SURFACE_EVENTS: ReadonlySet<RuntimeEvent['type']> = new Set([
+  'approval.resolved',
+  'part.add',
+  'part.replace',
+  'text.delta',
+]);
+
 const TERMINAL_PERSISTENCE_RETRY_DELAYS_MS = [0, 50, 200] as const;
-const NO_IMAGE_MEDIA_CAPABILITIES = { image: false, video: true, audio: true } as const;
 
 type MobileAgentHostOverrides = {
   agents: AgentDefinitionSource;
@@ -230,6 +226,7 @@ function createCompletionSignal(): { promise: Promise<void>; resolve: () => void
   'BackgroundReplyRuntime',
   'McpRuntimeService',
   'WebSearchService',
+  'AgentRuntime',
 ])
 @AppStatePolicy('continue')
 export class MobileAgentHost extends BaseService implements AgentProtocol {
@@ -252,17 +249,18 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
   private acceptingSubmissions = true;
 
   /**
-   * Lifecycle composition supplies the selected store adapter. Production
-   * binds `local` directly to Pi; tests may replace the Runtime and Agent ports.
+   * Lifecycle composition supplies the selected store adapter and the Runtime
+   * bound at the composition root (`AgentRuntime` registration); tests may
+   * replace the Runtime and Agent ports.
    */
   constructor(
     private readonly store: AgentSessionStore,
-    aiService: AiService,
-    preferenceService: PreferenceService,
+    private readonly aiService: AiService,
+    private readonly preferenceService: PreferenceService,
     private readonly backgroundReply: BackgroundReplyLifecycle,
     mcpRuntime: McpRuntimeService,
     private readonly webSearchService: WebSearchService,
-    private readonly runtime: AgentRuntime = new PiRuntime(createPiModelResolver()),
+    private readonly runtime: AgentRuntime,
     private readonly overrides: Partial<MobileAgentHostOverrides> = {},
   ) {
     super();
@@ -297,12 +295,27 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
     return (
       this.overrides.tools ??
       (this.lazySystemCapabilities ??= createSystemCapabilitySource({
+        ai: this.aiService,
+        preference: this.preferenceService,
         webSearch: this.webSearchService,
       }))
     );
   }
 
   private lazySystemCapabilities: SystemCapabilitySource | undefined;
+
+  /** Ports for the write-free preparation stage; accessors keep test overrides live. */
+  private get turnPreparation(): TurnPreparationDependencies {
+    return {
+      agents: this.agents,
+      files: this.files,
+      inferenceModel: this.inferenceModel,
+      routeExecutionTarget: (target) => this.routeExecutionTarget(target),
+      runtimeTools: this.runtimeTools,
+      store: this.store,
+      systemCapabilities: this.systemCapabilities,
+    };
+  }
 
   /** Reconcile any unfinished state available from the selected store. */
   protected override async onInit(): Promise<void> {
@@ -440,146 +453,21 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
       completion: completion.promise,
     });
     try {
-      const session = await raceAbort(this.store.getSession(sessionId), signal);
-      if (!session) {
-        fail('SESSION_NOT_FOUND', `Session does not exist: ${sessionId}`);
-      }
-      const configuredAgent = await raceAbort(this.requireAgent(session.agentId), signal);
-      const agent = applyTurnOverrides(configuredAgent, parsed);
-      const runtime = this.routeExecutionTarget(session.executionTarget);
-      if (
-        !runtime.descriptor.capabilities.attachments &&
-        parsed.parts.some((part) => part.type === 'file')
-      ) {
-        fail('CAPABILITY_UNSUPPORTED', 'File attachments are not supported for this Agent.');
-      }
-
-      const storedContextCandidate = await raceAbort(
-        this.store.getLatestContextCheckpoint(sessionId),
-        signal,
-      );
-      const checkpointValidation = storedContextCandidate
-        ? validateRuntimeContextCheckpointCandidate(storedContextCandidate.checkpoint)
-        : null;
-      const requestedCheckpoint = checkpointValidation?.checkpoint ?? null;
-      const storedTurnContext = await raceAbort(
-        this.store.loadRuntimeTurnContext(sessionId, requestedCheckpoint?.anchorTurnId ?? null),
-        signal,
-      );
-      const runtimeContextCheckpoint =
-        requestedCheckpoint && storedTurnContext.anchorFound ? requestedCheckpoint : null;
-      const runtimeContextIssue =
-        checkpointValidation?.issue ??
-        (requestedCheckpoint && !storedTurnContext.anchorFound
-          ? 'CONTEXT_CHECKPOINT_ANCHOR_INVALID'
-          : null);
-      if (runtimeContextIssue) {
-        logger.warn('Agent context checkpoint rejected; replaying full history', {
-          code: runtimeContextIssue,
-          checkpointMessageId: storedContextCandidate?.assistantMessageId,
-          sessionId,
-        });
-      }
-      const { availableFiles, inputFiles, parts } = await this.resolveManagedInput(
-        parsed.parts,
-        storedTurnContext.history,
-        signal,
-      );
-      const resources = createTurnResourceLedger(
-        inputFiles,
-        storedTurnContext.referencedFileEntryIds,
-        availableFiles,
-      );
-
-      // Freeze system capabilities and configured MCP tools for the turn so mid-turn changes
-      // cannot alter the active catalog. The catalog closes over this turn's
-      // resource ledger, never a global file surface. System capability
-      // resolution remains optional; configured MCP binding resolution fails closed.
-      let systemTools: readonly RuntimeTool[] = [];
-      let configuredTools: readonly RuntimeTool[] = [];
-      if (runtime.descriptor.capabilities.tools) {
-        try {
-          systemTools = await raceAbort(
-            this.systemCapabilities.getTools({
-              model: agent.model,
-              resources,
-              temporaryCapabilities: new Set(parsed.temporaryCapabilities ?? []),
-            }),
-            signal,
-          );
-        } catch (error) {
-          signal.throwIfAborted();
-          logger.warn(
-            'Failed to resolve system capabilities; continuing without them',
-            error as Error,
-          );
-        }
-        try {
-          configuredTools = await raceAbort(this.runtimeTools.resolve(agent.id), signal);
-        } catch {
-          signal.throwIfAborted();
-          fail('EXECUTION_UNAVAILABLE', 'The configured Agent tools are unavailable.');
-        }
-      }
-      const tools = applyAgentToolApprovalMode(
-        [...systemTools, ...configuredTools],
-        agent.toolApprovalMode,
-      );
-      let inferenceModel: Awaited<ReturnType<AgentInferenceModelResolver>>;
-      try {
-        inferenceModel = await raceAbort(this.inferenceModel(agent.model), signal);
-      } catch {
-        signal.throwIfAborted();
-        fail('EXECUTION_UNAVAILABLE', 'The selected model is unavailable.');
-      }
-      const modelPreflight = await this.preflightModel(runtime, agent, signal);
-      if (tools.length > 0 && !modelPreflight.supportsTools) {
-        fail('CAPABILITY_UNSUPPORTED', 'The selected model does not support native tool calling.');
-      }
-      const inferenceSnapshot = createAgentInferenceSnapshot({
-        model: inferenceModel,
-        options: agent.options,
-        tools,
-      });
-
-      this.assertAttachmentRequestSupported(
-        runtime,
-        parts,
-        storedTurnContext.history,
-        resources,
-        modelPreflight,
-      );
-      const runtimeTextAttachments = await this.resolveRuntimeTextAttachments(
-        parts,
-        storedTurnContext.history,
-        resources,
-        signal,
-      );
+      // Every gate between admission and the first durable write lives in the
+      // preparation stage; a failure there leaves nothing to reconcile.
+      const plan = await prepareTurn(this.turnPreparation, parsed, signal);
 
       // Open the Runtime before creating durable pending rows. A failed open
       // must leave no reservation that startup reconciliation has to repair.
-      const runtimeSession = await this.getRuntimeSession(sessionId, runtime, signal);
+      const runtimeSession = await this.getRuntimeSession(sessionId, plan.runtime, signal);
       signal.throwIfAborted();
-
-      const userParts: AgentMessagePart[] = parts.map((part, index) =>
-        part.type === 'text'
-          ? { id: `input-${index}`, type: 'text', text: part.text, state: 'done' }
-          : {
-              id: `input-${index}`,
-              type: 'file',
-              fileEntryId: part.fileEntryId,
-              mediaType: part.mediaType,
-              ...(part.name !== undefined ? { name: part.name } : {}),
-              purpose: 'input-attachment',
-            },
-      );
 
       // Invariant 2: reservation commits before execution starts.
       const reserved = await this.store.reserveSubmission({
         sessionId,
-        userParts,
-        modelId: inferenceSnapshot.model.uniqueModelId,
-        inferenceSnapshot,
+        userParts: plan.userParts,
+        modelId: plan.inferenceSnapshot.model.uniqueModelId,
+        inferenceSnapshot: plan.inferenceSnapshot,
       });
 
       // The Turn projection starts here: reservation time is the turn start.
@@ -593,22 +481,22 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
         endedAt: null,
       };
       const state: ActiveTurnState = {
-        agent,
+        agent: plan.agent,
         abortController,
         turn,
         assistantMessage: reserved.assistantMessage,
         autoNamePromise: null,
-        autoNameUserParts: storedTurnContext.hasMessages ? null : parts,
+        autoNameUserParts: plan.hasMessages ? null : plan.inputParts,
         backgroundReply: this.startBackgroundReply({
-          agentId: agent.id,
-          agentName: agent.name,
+          agentId: plan.agent.id,
+          agentName: plan.agent.name,
           sessionId,
-          sessionTitle: session.title,
+          sessionTitle: plan.session.title,
         }),
         pendingApprovals: new Map(),
         pendingContextCheckpoint: null,
-        resources,
-        sessionTurnIds: new Set([...storedTurnContext.sessionTurnIds, reserved.turnId]),
+        resources: plan.resources,
+        sessionTurnIds: new Set([...plan.sessionTurnIds, reserved.turnId]),
         usage: null,
         runtimeSession,
       };
@@ -625,17 +513,7 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
         this.publishSessionRename(state.autoNamePromise);
       }
 
-      const run = this.runTurn(
-        sessionId,
-        agent,
-        state,
-        storedTurnContext.history,
-        parts,
-        runtimeContextCheckpoint,
-        runtimeTextAttachments,
-        modelPreflight,
-        tools,
-      );
+      const run = this.runTurn(sessionId, plan, state);
       this.runningTurns.add(run);
       this.runningTurnsBySession.set(sessionId, run);
       void run.finally(() => {
@@ -730,57 +608,33 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
 
   // ── Execution ──
 
-  private async runTurn(
-    sessionId: string,
-    agent: AgentDefinition,
-    state: ActiveTurnState,
-    history: AgentMessageView[],
-    inputParts: AgentInputPart[],
-    storedContextCheckpoint: RuntimeContextCheckpoint | null,
-    runtimeTextAttachments: RuntimeAttachmentContents,
-    modelPreflight: RuntimeModelPreflight,
-    tools: readonly RuntimeTool[],
-  ): Promise<void> {
+  private async runTurn(sessionId: string, plan: TurnPlan, state: ActiveTurnState): Promise<void> {
     try {
-      const runtimeAttachments = new Map(runtimeTextAttachments);
-      if (modelPreflight.inputModalities.includes('image')) {
-        const runtimeImages = await this.resolveRuntimeImages(
-          state.resources,
-          state.abortController.signal,
-        );
-        for (const [fileEntryId, image] of runtimeImages) {
-          runtimeAttachments.set(fileEntryId, image);
-        }
-      } else {
-        const omitImage = (fileEntryId: string, mediaType: string) => {
-          const text = unsupportedMediaNote(mediaType, NO_IMAGE_MEDIA_CAPABILITIES);
-          if (text) runtimeAttachments.set(fileEntryId, { type: 'text', text });
-        };
-        for (const part of inputParts) {
-          if (part.type === 'file') omitImage(part.fileEntryId, part.mediaType);
-        }
-        for (const message of history) {
-          if (message.role !== 'user') continue;
-          for (const part of message.parts) {
-            if (part.type === 'file' && part.purpose === 'input-attachment') {
-              omitImage(part.fileEntryId, part.mediaType);
-            }
-          }
-        }
-      }
+      const runtimeAttachments = await materializeRuntimeAttachments({
+        files: this.files,
+        history: plan.history,
+        inputParts: plan.inputParts,
+        modelPreflight: plan.modelPreflight,
+        resources: state.resources,
+        signal: state.abortController.signal,
+        textAttachments: plan.runtimeTextAttachments,
+      });
       state.abortController.signal.throwIfAborted();
       const events = state.runtimeSession.execute({
         turnId: state.turn.id,
-        instructions: agent.instructions,
-        model: agent.model,
-        history: toRuntimeHistory(history, runtimeAttachments),
-        contextCheckpoint: storedContextCheckpoint,
-        input: toRuntimeInputParts(inputParts, state.resources, runtimeAttachments),
-        tools: [...tools],
-        options: agent.options,
+        instructions: plan.agent.instructions,
+        model: plan.agent.model,
+        history: toRuntimeHistory(plan.history, runtimeAttachments),
+        contextCheckpoint: plan.runtimeContextCheckpoint,
+        input: toRuntimeInputParts(plan.inputParts, state.resources, runtimeAttachments),
+        tools: [...plan.tools],
+        options: plan.agent.options,
       });
       for await (const event of events) {
         const isTerminal = await this.handleRuntimeEvent(sessionId, state, event);
+        if (MESSAGE_SURFACE_EVENTS.has(event.type)) {
+          state.backgroundReply.update(state.assistantMessage);
+        }
         if (isTerminal) {
           return;
         }
@@ -854,7 +708,6 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
           messageId: state.assistantMessage.id,
           delta: { op: 'part.add', index: event.index, part },
         });
-        state.backgroundReply.update(state.assistantMessage);
         return false;
       }
       case 'text.delta': {
@@ -867,7 +720,6 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
           messageId: state.assistantMessage.id,
           delta: { op: 'text.append', partId: event.partId, text: event.text },
         });
-        state.backgroundReply.update(state.assistantMessage);
         return false;
       }
       case 'part.replace': {
@@ -881,7 +733,6 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
           messageId: state.assistantMessage.id,
           delta: { op: 'part.replace', part },
         });
-        state.backgroundReply.update(state.assistantMessage);
         return false;
       }
       case 'approval.requested': {
@@ -905,7 +756,6 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
           state.turn = { ...state.turn, status: 'running' };
           this.publish(sessionId, { type: 'turn.updated', turn: state.turn });
         }
-        state.backgroundReply.update(state.assistantMessage);
         this.publish(sessionId, { type: 'approval.resolved', approval });
         return false;
       }
@@ -1070,229 +920,6 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
 
   // ── Helpers ──
 
-  private async resolveManagedInput(
-    parts: AgentInputPart[],
-    history: AgentMessageView[],
-    signal: AbortSignal,
-  ) {
-    const fileEntryIds = parts.flatMap((part) => {
-      if (part.type !== 'file') {
-        return [];
-      }
-      const parsed = FileEntryIdSchema.safeParse(part.fileEntryId);
-      if (!parsed.success) {
-        fail('ATTACHMENT_UNAVAILABLE', 'An attached file is no longer available.');
-      }
-      return [parsed.data];
-    });
-
-    const historicalFileEntryIds = history.flatMap((message) =>
-      message.parts.flatMap((part) => {
-        if (part.type !== 'file' || part.purpose !== 'input-attachment') {
-          return [];
-        }
-        const parsed = FileEntryIdSchema.safeParse(part.fileEntryId);
-        return parsed.success ? [parsed.data] : [];
-      }),
-    );
-    let availableFiles: Awaited<ReturnType<ManagedFileResolver['resolveAvailable']>> = new Map();
-    if (fileEntryIds.length > 0 || historicalFileEntryIds.length > 0) {
-      try {
-        availableFiles = await raceAbort(
-          this.files.resolveAvailable([...fileEntryIds, ...historicalFileEntryIds]),
-          signal,
-        );
-      } catch {
-        signal.throwIfAborted();
-        fail('ATTACHMENT_UNAVAILABLE', 'An attached file could not be verified.');
-      }
-    }
-
-    const inputFiles = new Map(
-      fileEntryIds.flatMap((fileEntryId) => {
-        const fact = availableFiles.get(fileEntryId);
-        return fact ? [[fileEntryId, fact] as const] : [];
-      }),
-    );
-
-    const canonicalParts = parts.map((part): AgentInputPart => {
-      if (part.type !== 'file') {
-        return part;
-      }
-      const fact = inputFiles.get(part.fileEntryId);
-      if (!fact) {
-        fail('ATTACHMENT_UNAVAILABLE', 'An attached file is no longer available.');
-      }
-      if (
-        part.mediaType !== fact.mediaType ||
-        (part.name !== undefined && part.name !== fact.name)
-      ) {
-        fail('ATTACHMENT_METADATA_MISMATCH', 'Attached file metadata could not be verified.');
-      }
-      return {
-        type: 'file',
-        fileEntryId: fact.fileEntryId,
-        mediaType: fact.mediaType,
-        name: fact.name,
-      };
-    });
-
-    return { availableFiles, inputFiles, parts: canonicalParts };
-  }
-
-  private async preflightModel(
-    runtime: AgentRuntime,
-    agent: AgentDefinition,
-    signal: AbortSignal,
-  ): Promise<RuntimeModelPreflight> {
-    try {
-      return await raceAbort(runtime.preflightModel(agent.model), signal);
-    } catch {
-      signal.throwIfAborted();
-      fail(
-        'CAPABILITY_UNSUPPORTED',
-        'The selected model or provider endpoint cannot execute this turn.',
-      );
-    }
-  }
-
-  private assertAttachmentRequestSupported(
-    runtime: AgentRuntime,
-    input: AgentInputPart[],
-    history: AgentMessageView[],
-    resources: TurnResourceLedger,
-    model: RuntimeModelPreflight,
-  ): void {
-    let hasAttachments = false;
-    const images = input.flatMap((part) => {
-      if (part.type !== 'file') {
-        return [];
-      }
-      const fact = resources.inputFiles.get(part.fileEntryId);
-      if (!fact) {
-        fail('ATTACHMENT_UNAVAILABLE', 'An attached file is no longer available.');
-      }
-      hasAttachments = true;
-      if (isAiSupportedImageMediaType(fact.mediaType)) {
-        return [fact];
-      }
-      if (isSupportedTextAttachment(fact)) {
-        return [];
-      }
-      fail('ATTACHMENT_INVALID', unsupportedAttachmentMessage(fact));
-    });
-
-    for (const message of history) {
-      for (const part of message.parts) {
-        if (part.type !== 'file' || part.purpose !== 'input-attachment') {
-          continue;
-        }
-        const fact = resources.availableFiles.get(part.fileEntryId);
-        if (fact && isAiSupportedImageMediaType(fact.mediaType)) {
-          hasAttachments = true;
-          images.push(fact);
-        } else if (fact && isSupportedTextAttachment(fact)) {
-          hasAttachments = true;
-        }
-      }
-    }
-
-    if (!hasAttachments) {
-      return;
-    }
-    if (!runtime.descriptor.capabilities.attachments) {
-      fail('CAPABILITY_UNSUPPORTED', 'The selected runtime does not support file attachments.');
-    }
-    if (images.length === 0) {
-      return;
-    }
-    if (!model.inputModalities.includes('image')) {
-      // runTurn replaces these references with text notes without reading image bytes.
-      return;
-    }
-
-    const limit = findImageAttachmentLimit(images, model);
-    if (limit) {
-      fail('CAPABILITY_UNSUPPORTED', imageAttachmentLimitMessage(limit));
-    }
-  }
-
-  private async resolveRuntimeTextAttachments(
-    input: AgentInputPart[],
-    history: AgentMessageView[],
-    resources: TurnResourceLedger,
-    signal: AbortSignal,
-  ): Promise<RuntimeAttachmentContents> {
-    const currentFileEntryIds = input.flatMap((part) =>
-      part.type === 'file' ? [part.fileEntryId] : [],
-    );
-    const historicalFileEntryIds: string[] = [];
-    for (let messageIndex = history.length - 1; messageIndex >= 0; messageIndex -= 1) {
-      const parts = history[messageIndex]?.parts ?? [];
-      for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
-        const part = parts[partIndex];
-        if (part?.type === 'file' && part.purpose === 'input-attachment') {
-          historicalFileEntryIds.push(part.fileEntryId);
-        }
-      }
-    }
-
-    try {
-      return await resolveManagedTextAttachments({
-        availableFiles: resources.availableFiles,
-        currentFileEntryIds,
-        historicalFileEntryIds,
-        readBytes: (file, signal) => this.files.readAsBytes(file, signal),
-        signal,
-      });
-    } catch (error) {
-      signal.throwIfAborted();
-      if (error instanceof TextAttachmentError) {
-        fail(
-          error.failure === 'unavailable' ? 'ATTACHMENT_UNAVAILABLE' : 'ATTACHMENT_INVALID',
-          error.message,
-        );
-      }
-      fail('ATTACHMENT_UNAVAILABLE', 'An attached text file could not be resolved.');
-    }
-  }
-
-  private async resolveRuntimeImages(
-    resources: TurnResourceLedger,
-    signal: AbortSignal,
-  ): Promise<RuntimeAttachmentContents> {
-    const files = new Map<string, Extract<RuntimeInputPart, { type: 'file' }>>();
-    for (const fact of resources.availableFiles.values()) {
-      if (!isAiSupportedImageMediaType(fact.mediaType)) {
-        continue;
-      }
-      try {
-        const uri = await this.files.readAsDataUrl(fact, signal);
-        signal.throwIfAborted();
-        if (!uri || !uri.startsWith(`data:${fact.mediaType};base64,`)) {
-          if (resources.inputFiles.has(fact.fileEntryId)) {
-            throw new Error('A current managed image became unavailable.');
-          }
-          continue;
-        }
-        files.set(fact.fileEntryId, {
-          type: 'file',
-          mediaType: fact.mediaType,
-          name: fact.name,
-          uri,
-        });
-      } catch {
-        if (signal.aborted) {
-          throw signal.reason ?? new Error('Managed image resolution was aborted.');
-        }
-        if (resources.inputFiles.has(fact.fileEntryId)) {
-          throw new Error('A current managed image could not be read.');
-        }
-      }
-    }
-    return files;
-  }
-
   private assertIdle(sessionId: string): void {
     if (!this.acceptingSubmissions) {
       fail('EXECUTION_UNAVAILABLE', 'The Agent Host is stopping.');
@@ -1417,65 +1044,4 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
         logger.warn('Agent Session auto-naming failed', error as Error);
       });
   }
-}
-
-function applyTurnOverrides(
-  agent: AgentDefinition,
-  input: Pick<AgentSubmitMessageInput, 'modelId' | 'reasoningEffort'>,
-): AgentDefinition {
-  if (input.modelId === undefined && input.reasoningEffort === undefined) {
-    return agent;
-  }
-
-  const options = { ...agent.options };
-  if (input.reasoningEffort !== undefined) {
-    if (input.reasoningEffort === 'default' || input.reasoningEffort === 'auto') {
-      // Pi resolves an absent effort to the selected model's default. Removing
-      // the Agent setting here makes an explicit composer "default" win.
-      delete options.reasoningEffort;
-    } else {
-      options.reasoningEffort = input.reasoningEffort === 'none' ? 'off' : input.reasoningEffort;
-    }
-  }
-
-  return {
-    ...agent,
-    ...(input.modelId ? { model: parseUniqueModelId(input.modelId) } : {}),
-    options,
-  };
-}
-
-/**
- * Applies only the Agent's interactive approval preference. Tool availability,
- * hard denies, system permission, and callback-level resource checks are left
- * untouched and continue to fail closed.
- */
-function applyAgentToolApprovalMode(
-  tools: readonly RuntimeTool[],
-  mode: AgentDefinition['toolApprovalMode'],
-): RuntimeTool[] {
-  if (mode === 'default') {
-    return [...tools];
-  }
-
-  return tools.map((tool) =>
-    tool.approval === 'ask' ? { ...tool, approval: 'auto' as const } : tool,
-  );
-}
-
-function imageAttachmentLimitMessage(limit: ImageAttachmentLimit): string {
-  switch (limit) {
-    case 'count':
-      return 'Too many images are attached to this request.';
-    case 'file-bytes':
-      return 'An attached image exceeds the per-file size limit.';
-    case 'total-bytes':
-      return 'The attached images exceed the total request size limit.';
-    case 'context':
-      return 'The attached images exceed the selected model context budget.';
-  }
-}
-
-function unsupportedAttachmentMessage(file: ManagedFileFact): string {
-  return `Attachment ${JSON.stringify(file.name)} has unsupported media type ${JSON.stringify(file.mediaType)}.`;
 }

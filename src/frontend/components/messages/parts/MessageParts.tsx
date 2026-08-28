@@ -1,8 +1,12 @@
+import { View } from 'react-native';
+
 import type { MessageListItem } from '../types';
 import { resolveMessageCitationText } from './citations';
 import { MessagePartRenderer } from './MessagePartRenderer';
+import { SourceGroup } from './SourceGroup';
 
 type MessagePartsProps = {
+  isTextSelectionEnabled: boolean;
   message: MessageListItem;
   renderMode?: MessagePartRenderMode;
 };
@@ -17,7 +21,11 @@ function getMessagePartKey(
   return `${message.id}-${part.type}-${index}`;
 }
 
-export function MessageParts({ message, renderMode = 'markdown' }: MessagePartsProps) {
+export function MessageParts({
+  isTextSelectionEnabled,
+  message,
+  renderMode = 'markdown',
+}: MessagePartsProps) {
   const parts = message.data.parts;
 
   if (!parts?.length) {
@@ -25,17 +33,28 @@ export function MessageParts({ message, renderMode = 'markdown' }: MessagePartsP
   }
 
   const citationText = resolveMessageCitationText(parts);
+  const sourceParts = parts.filter((part) => part.type === 'source-url');
 
-  return parts.map((part, index) => {
-    const resolvedText = citationText.get(index);
-    return (
-      <MessagePartRenderer
-        isStreaming={message.status === 'pending'}
-        key={getMessagePartKey(message, part, index)}
-        part={part}
-        renderMode={renderMode}
-        resolvedText={resolvedText}
-      />
-    );
-  });
+  return (
+    <View className="gap-2">
+      {parts.map((part, index) => {
+        if (part.type === 'source-url') {
+          return null;
+        }
+
+        const resolvedText = citationText.get(index);
+        return (
+          <MessagePartRenderer
+            isStreaming={message.status === 'pending'}
+            isTextSelectionEnabled={isTextSelectionEnabled}
+            key={getMessagePartKey(message, part, index)}
+            part={part}
+            renderMode={renderMode}
+            resolvedText={resolvedText}
+          />
+        );
+      })}
+      {sourceParts.length > 0 ? <SourceGroup parts={sourceParts} /> : null}
+    </View>
+  );
 }

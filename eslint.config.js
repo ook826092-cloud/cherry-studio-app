@@ -190,6 +190,49 @@ const backendCoreLayer = {
     'The lifecycle core must not depend on the modules it manages. Register concrete services in serviceRegistry.ts instead.',
 };
 
+const runtimeContractLayer = {
+  group: aliasRoots(['backend/data', 'backend/services']),
+  message:
+    'The Agent Runtime contract must not depend on persistence or the Data API; the Host adapts them.',
+};
+
+// Pi isolation (Success Criterion 1 in docs/references/ai/target-architecture.md):
+// outside the Pi zone, backend code reaches Pi only through the AgentRuntime
+// contract. The zone is the single directory agent/runtime/pi; its own block
+// below spells its union without this ban, and `serviceRegistry.ts` stays
+// exempt because binding the concrete Runtime is assembly. Relative specifiers
+// bypass alias globs, so the raw directory name is banned as well.
+const piZoneFiles = ['src/backend/ai/agent/runtime/pi/**/*.{ts,tsx}'];
+
+const piIsolation = {
+  group: [
+    '@earendil-works/*',
+    '@earendil-works/*/**',
+    ...aliasRoots(['backend/ai/agent/runtime/pi']),
+    '**/pi',
+    '**/pi/**',
+  ],
+  message:
+    'Pi is one Runtime implementation. Depend on the AgentRuntime contract; only agent/runtime/pi may name Pi modules or @earendil-works packages.',
+};
+
+// `generation/` is the private implementation of AiService: the AI SDK path
+// for non-conversation work. Only `AiService.ts` may reach into it, so the
+// facade stays the single entry point and provider/ keeps to runtime-agnostic
+// connection facts. Relative specifiers bypass alias globs, hence the bare
+// directory name as well.
+const aiSdkGenerationZoneFiles = [
+  'src/backend/ai/AiService.ts',
+  'src/backend/ai/generation/**/*.{ts,tsx}',
+  'src/backend/ai/__tests__/**/*.{ts,tsx}',
+];
+
+const aiSdkGenerationPrivacy = {
+  group: [...aliasRoots(['backend/ai/generation']), '**/generation', '**/generation/**'],
+  message:
+    'generation/ is AiService private implementation. Depend on AiService instead of its AI SDK internals.',
+};
+
 const frontendLayer = layerPattern(
   ['app', 'backend', 'bootstrap'],
   'Frontend may depend only on frontend and shared modules. Use Data API hooks for resources, preference hooks for settings, and useBackendModule() for workflows.',
@@ -319,7 +362,19 @@ module.exports = defineConfig([
       ),
     ],
   ),
-  restrictedImports(['src/backend/**/*.{ts,tsx}'], [backendLayer]),
+  {
+    files: ['src/backend/**/*.{ts,tsx}'],
+    ignores: [...piZoneFiles, ...aiSdkGenerationZoneFiles],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: [backendLayer, piIsolation, aiSdkGenerationPrivacy] },
+      ],
+    },
+  },
+  // The facade and its own implementation are the inside of the generation
+  // boundary; the Pi ban still applies to them.
+  restrictedImports(aiSdkGenerationZoneFiles, [backendLayer, piIsolation]),
   // The Agent Runtime contract and its FakeRuntime are process-local but must
   // stay independent of the application protocol, persistence, React, and Expo
   // (Runtime dependency rule and conformance item 11 in
@@ -327,29 +382,60 @@ module.exports = defineConfig([
   // requests and may touch node builtins, so they are exempt.
   {
     files: ['src/backend/ai/agent/runtime/**/*.{ts,tsx}'],
-    ignores: ['src/backend/ai/agent/runtime/**/__tests__/**/*.{ts,tsx}'],
+    ignores: [
+      'src/backend/ai/agent/runtime/**/__tests__/**/*.{ts,tsx}',
+      'src/backend/ai/agent/runtime/pi/**/*.{ts,tsx}',
+    ],
     rules: {
       '@typescript-eslint/no-restricted-imports': [
         'error',
-        {
-          patterns: [
-            backendLayer,
-            {
-              group: aliasRoots(['backend/data', 'backend/services']),
-              message:
-                'The Agent Runtime contract must not depend on persistence or the Data API; the Host adapts them.',
-            },
-            sharedPlatformIndependence,
-          ],
-        },
+        { patterns: [backendLayer, runtimeContractLayer, sharedPlatformIndependence, piIsolation] },
       ],
     },
   },
-  restrictedImports(['src/backend/services/**/*.{ts,tsx}'], [backendLayer, backendServicesLayer]),
-  restrictedImports(['src/backend/data/**/*.{ts,tsx}'], [backendLayer, backendDataLayer]),
-  restrictedImports(['src/backend/core/**/*.{ts,tsx}'], [backendLayer, backendCoreLayer]),
-  // Registration is assembly: this file names every concrete service class, so
-  // it keeps only the outer backend layer rule.
+  // The Pi implementation honors the same contract constraints but is the one
+  // Runtime directory allowed to name Pi modules and @earendil-works packages.
+  // The exception below matches the boundary the PiRuntime conformance harness
+  // draws with its `sourceFiles` list, so lint and conformance agree on which
+  // files must stay pure.
+  {
+    files: ['src/backend/ai/agent/runtime/pi/**/*.{ts,tsx}'],
+    ignores: [
+      'src/backend/ai/agent/runtime/pi/__tests__/**/*.{ts,tsx}',
+      'src/backend/ai/agent/runtime/pi/piModelResolver.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: [backendLayer, runtimeContractLayer, sharedPlatformIndependence] },
+      ],
+    },
+  },
+  // `piModelResolver.ts` is the Pi zone's one bridge from app entities to Pi: it
+  // reads Provider and Model records and materializes an Expo-backed fetch,
+  // which is precisely what the contract layer may not do. Pi runtime tests
+  // arrange fixtures with node builtins. Both keep only the backend layer rule.
+  restrictedImports(
+    [
+      'src/backend/ai/agent/runtime/pi/piModelResolver.ts',
+      'src/backend/ai/agent/runtime/pi/__tests__/**/*.{ts,tsx}',
+    ],
+    [backendLayer],
+  ),
+  restrictedImports(
+    ['src/backend/services/**/*.{ts,tsx}'],
+    [backendLayer, backendServicesLayer, piIsolation],
+  ),
+  restrictedImports(
+    ['src/backend/data/**/*.{ts,tsx}'],
+    [backendLayer, backendDataLayer, piIsolation],
+  ),
+  restrictedImports(
+    ['src/backend/core/**/*.{ts,tsx}'],
+    [backendLayer, backendCoreLayer, piIsolation],
+  ),
+  // Registration is assembly: this file names every concrete service class —
+  // including the Pi Runtime binding — so it keeps only the backend layer rule.
   restrictedImports(['src/backend/core/application/serviceRegistry.ts'], [backendLayer]),
   restrictedImports(['src/frontend/**/*.{ts,tsx}'], [frontendLayer]),
   restrictedImports(sharedFrontendDirectories, [frontendLayer, frontendSharedLayer]),

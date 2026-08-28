@@ -18,6 +18,7 @@ jest.mock('../utils/orderKey', () => ({
 jest.mock('../ProviderRegistryService', () => ({
   providerRegistryService: {
     getProviderDisplayMetadata: jest.fn(() => ({})),
+    getExcludedProviderIds: jest.fn(() => []),
     isProviderExcluded: jest.fn(() => false),
     isRegistryProvider: jest.fn(() => false),
   },
@@ -40,10 +41,7 @@ describe('ProviderService', () => {
         {},
         { name: 'Grok CLI', presetProviderId: 'grok-cli', providerId: 'grok-cli' },
       ),
-      createProviderRow(
-        {},
-        { name: 'CherryAI', presetProviderId: 'cherryai', providerId: 'cherryai' },
-      ),
+      createProviderRow({}, { name: 'Gemini', presetProviderId: 'gemini', providerId: 'gemini' }),
       createProviderRow({}, { name: 'Custom provider', providerId: 'custom-provider' }),
     ];
     jest
@@ -57,14 +55,14 @@ describe('ProviderService', () => {
 
     await expect(service.list()).resolves.toEqual([
       expect.objectContaining({ id: 'openrouter' }),
-      expect.objectContaining({ id: 'cherryai' }),
+      expect.objectContaining({ id: 'gemini' }),
       expect.objectContaining({ id: 'custom-provider' }),
     ]);
     expect(rows.map((row) => row.providerId)).toEqual([
       'openrouter',
       'openai-codex',
       'grok-cli',
-      'cherryai',
+      'gemini',
       'custom-provider',
     ]);
   });

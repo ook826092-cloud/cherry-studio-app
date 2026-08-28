@@ -1,8 +1,12 @@
 # AI Runtime Instructions
 
-When changing mapped or ported source, or changing behavior synchronized from Desktop, read
-[README.md](README.md), update the provenance evidence, and run `pnpm check` plus
-`pnpm ai-runtime:check --desktop-root <path>` from this directory. A port is trusted only while both
-gates pass. Other package changes use the relevant checks in
-[Testing And CI](../../docs/guides/testing-and-ci.md). Keep platform behavior behind backend adapters
-and expose package behavior only through the five declared subpaths.
+This package is the vendor-adaptation layer for the AI SDK path, not a staging area for migration
+into `src/backend/ai`. Read [README.md](README.md) and
+[Backend AI Target Architecture](../../docs/references/ai/target-architecture.md) before changing
+source.
+
+Run `pnpm check` from this directory. Keep platform behavior behind backend adapters, and expose
+package behavior only through the four declared subpaths. New provider or transport adaptation
+belongs here; anything that serves the conversation turn belongs behind the Agent Runtime contract
+in `src/backend/ai/agent/runtime/`. Other package changes use the relevant checks in
+[Testing And CI](../../docs/guides/testing-and-ci.md).

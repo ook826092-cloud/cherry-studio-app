@@ -39,12 +39,10 @@ export type {
 } from './FakeRuntime';
 export { FakeRuntime } from './FakeRuntime';
 export { raceAbort, settleWithin } from './raceAbort';
+export { type MediaCapabilities, unsupportedMediaNote } from './unsupportedMedia';
 export {
   createDeniedToolResult,
   createErrorToolResult,
   createInterruptedToolResult,
   TOOL_EXECUTION_ERROR,
 } from './toolResults';
-
-export type { PiModelResolution, PiRuntimeDependencies } from './pi/PiRuntime';
-export { PiRuntime } from './pi/PiRuntime';
