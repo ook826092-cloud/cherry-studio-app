@@ -19,13 +19,14 @@ import { PROVIDER_LIST_PAGE_SIZE, PROVIDER_LIST_STALE_TIME } from './providerLis
 const PROVIDER_ROW_ESTIMATED_HEIGHT = 50;
 const PROVIDER_SECTION_HEADER_ESTIMATED_HEIGHT = 48;
 
-type ProviderListRow = SettingsServiceRowProps & { isEnabled: boolean };
+type ProviderListRow = SettingsServiceRowProps & {
+  isEnabled: boolean;
+};
 type ProviderListSection = { data: ProviderListRow[]; title: string };
 
 const keyExtractor = (item: ProviderListRow) => item.id;
 const renderProviderRow = ({ item }: { item: ProviderListRow }) => {
   const { isEnabled: _isEnabled, ...row } = item;
-
   return <SettingsServiceRow {...row} />;
 };
 const renderProviderSectionHeader = ({ section }: { section: ProviderListSection }) => (

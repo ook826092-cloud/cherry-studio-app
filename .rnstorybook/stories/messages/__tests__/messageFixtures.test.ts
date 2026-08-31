@@ -2,6 +2,7 @@ import { readCherryMeta } from '@cherrystudio/universal/data/types/uiParts';
 
 import {
   messageExamples,
+  STORY_EDITED_FILE_ENTRY_ID,
   STORY_FILE_ENTRY_ID,
   STORY_WRITTEN_FILE_ENTRY_ID,
 } from '../messageFixtures';
@@ -40,6 +41,7 @@ describe('messages Storybook fixtures', () => {
     expect([...toolNames]).toEqual(
       expect.arrayContaining([
         'calculator',
+        'edit_file',
         'read_file',
         'tool_exec',
         'tool_inspect',
@@ -54,15 +56,17 @@ describe('messages Storybook fixtures', () => {
         (part) => part.type === 'file' && readCherryMeta(part)?.fileEntryId === STORY_FILE_ENTRY_ID,
       ),
     ).toBe(true);
-    // A written file renders as a card, so its id must be one the story providers resolve.
     expect(
       parts.some(
         (part) =>
-          part.type === 'dynamic-tool' &&
-          part.toolName === 'write_file' &&
-          part.state === 'output-available' &&
-          (part.output as { fileEntryId?: string } | undefined)?.fileEntryId ===
-            STORY_WRITTEN_FILE_ENTRY_ID,
+          part.type === 'file' && readCherryMeta(part)?.fileEntryId === STORY_EDITED_FILE_ENTRY_ID,
+      ),
+    ).toBe(true);
+    // A written file renders as its own card, so its id must be one the story providers resolve.
+    expect(
+      parts.some(
+        (part) =>
+          part.type === 'file' && readCherryMeta(part)?.fileEntryId === STORY_WRITTEN_FILE_ENTRY_ID,
       ),
     ).toBe(true);
   });
