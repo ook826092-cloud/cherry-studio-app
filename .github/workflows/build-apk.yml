@@ -82,11 +82,10 @@ jobs:
       - if: steps.check.outputs.skip != 'true'
         name: 调优 Gradle 编译（加大内存 / 并行 / 构建缓存）
         run: |
-          cat >> android/gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1g
-          org.gradle.parallel=true
-          org.gradle.caching=true
-          EOF
+          # 先补一个换行再追加，防止 gradle.properties 末尾没有换行符导致内容粘连（曾污染 buildToolsVersion 导致编译失败）
+          printf '\norg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1g\norg.gradle.parallel=true\norg.gradle.caching=true\n' >> android/gradle.properties
+          echo '--- 追加后的 gradle.properties 末尾 ---'
+          tail -5 android/gradle.properties
 
       - if: steps.check.outputs.skip != 'true'
         name: 配置 Gradle 缓存（自动计算 key + 清理过期缓存）
@@ -166,6 +165,12 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            // 仓库未启用 Issues 时跳过（避免报错）
+            const repo = await github.rest.repos.get({ owner: context.repo.owner, repo: context.repo.repo });
+            if (!repo.data.has_issues) {
+              console.log('仓库未启用 Issues，跳过自动建 Issue');
+              return;
+            }
             const title = `⛔ APK 构建失败 #${context.runId}`;
             const q = `repo:${context.repo.owner}/${context.repo.repo} type:issue state:open in:title "${title}"`;
             const { data: search } = await github.rest.search.issuesAndPullRequests({ q });
