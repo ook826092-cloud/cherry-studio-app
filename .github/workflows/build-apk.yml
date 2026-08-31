@@ -61,17 +61,6 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - if: steps.check.outputs.skip != 'true'
-        name: 缓存 Gradle 依赖（加速编译）
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-
-
-      - if: steps.check.outputs.skip != 'true'
         name: 安装依赖 + 构建工作区包 + 生成安卓原生代码
         run: |
           pnpm install
@@ -80,6 +69,21 @@ jobs:
         env:
           EXPO_ANDROID_KEYSTORE_PASSWORD: ""
           EXPO_ANDROID_KEY_PASSWORD: ""
+
+      - if: steps.check.outputs.skip != 'true'
+        name: 调优 Gradle 编译（加大内存 / 并行 / 构建缓存）
+        run: |
+          cat >> android/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1g
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          EOF
+
+      - if: steps.check.outputs.skip != 'true'
+        name: 配置 Gradle 缓存（自动计算 key + 清理过期缓存）
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-cleanup: true
 
       - if: steps.check.outputs.skip != 'true'
         name: 配置签名密钥 + 开启 R8 混淆
