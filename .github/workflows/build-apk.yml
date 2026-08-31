@@ -9,29 +9,32 @@ concurrency:
   group: build-apk
   cancel-in-progress: true
 
+permissions:
+  contents: write
+  issues: write
+
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
 
     steps:
-      - name: 拉取代码
-        uses: actions/checkout@v4
-        with:
-          ref: v0.2
-          fetch-tags: true
-
-      - name: 检查最近12小时有无新提交
+      # 用 API 判断 12 小时内有无新提交，先于拉代码，跳过时省去整个 checkout
+      - name: 检查最近12小时有无新提交（API 先判）
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" == "schedule" ]; then
-            COMMITS=$(git log --since="12 hours ago" --oneline | wc -l)
-            if [ "$COMMITS" -eq 0 ]; then
+            SINCE=$(date -u -d '12 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+            # API 异常时按“有提交”处理（宁可多编译一次，不可漏发版）
+            COUNT=$(gh api "repos/${{ github.repository }}/commits?sha=v0.2&since=$SINCE&per_page=100" --jq 'length' 2>/dev/null || echo 1)
+            if [ "$COUNT" -eq 0 ]; then
               echo "skip=true" >> "$GITHUB_OUTPUT"
               echo "⏭️ 12小时内无新提交，跳过本次编译"
             else
               echo "skip=false" >> "$GITHUB_OUTPUT"
-              echo "✅ 12小时内有 $COMMITS 次提交，继续编译"
+              echo "✅ 12小时内有 $COUNT 次提交，继续编译"
             fi
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -39,16 +42,25 @@ jobs:
           fi
 
       - if: steps.check.outputs.skip != 'true'
+        name: 拉取代码（浅克隆）
+        uses: actions/checkout@v4
+        with:
+          ref: v0.2
+          fetch-depth: 1
+
+      - if: steps.check.outputs.skip != 'true'
         name: 安装 pnpm
         uses: pnpm/action-setup@v4
 
+      # Node 版本与 package.json engines（24.x）对齐
       - if: steps.check.outputs.skip != 'true'
-        name: 安装 Node.js 22
+        name: 安装 Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
+      # 注意：上游 Expo SDK 若升级到要求 JDK 21 的 AGP 版本，把这里改成 21
       - if: steps.check.outputs.skip != 'true'
         name: 安装 Java 17
         uses: actions/setup-java@v4
@@ -56,14 +68,11 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - if: steps.check.outputs.skip != 'true'
-        name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
-
+      # GitHub 官方镜像已自带 Android SDK 且 license 已接受，无需 setup-android
       - if: steps.check.outputs.skip != 'true'
         name: 安装依赖 + 构建工作区包 + 生成安卓原生代码
         run: |
-          pnpm install
+          pnpm install --frozen-lockfile
           pnpm packages:build
           npx expo prebuild --platform android --clean
         env:
@@ -113,6 +122,8 @@ jobs:
         run: |
           APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -1)
           echo "找到 APK: $APK"
+          ls -lh "$APK"
+          file "$APK"
           echo "apk-path=$APK" >> "$GITHUB_OUTPUT"
 
       - if: steps.check.outputs.skip != 'true'
@@ -147,3 +158,31 @@ jobs:
           make_latest: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 构建失败时自动建 Issue（按 runId 去重，重跑不会重复建）
+      - name: 构建失败自动建 Issue
+        if: failure()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `⛔ APK 构建失败 #${context.runId}`;
+            const q = `repo:${context.repo.owner}/${context.repo.repo} type:issue state:open in:title "${title}"`;
+            const { data: search } = await github.rest.search.issuesAndPullRequests({ q });
+            if (search.total_count > 0) {
+              console.log('已存在相同 Issue，跳过');
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body: [
+                '构建失败详情：',
+                `- 触发方式：${context.eventName}`,
+                `- 分支：${context.ref}`,
+                `- 运行日志：${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+                '',
+                '本 Issue 由 Actions 自动创建，构建成功后请手动关闭。',
+              ].join('\n')
+            });
