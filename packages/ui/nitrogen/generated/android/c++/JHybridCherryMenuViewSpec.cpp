@@ -11,6 +11,8 @@
 namespace margelo::nitro::cherrystudio::ui { struct NativeMenuItem; }
 // Forward declaration of `NativeMenuCheckedState` to properly resolve imports.
 namespace margelo::nitro::cherrystudio::ui { enum class NativeMenuCheckedState; }
+// Forward declaration of `NativeMenuIcon` to properly resolve imports.
+namespace margelo::nitro::cherrystudio::ui { enum class NativeMenuIcon; }
 // Forward declaration of `NativeMenuTrigger` to properly resolve imports.
 namespace margelo::nitro::cherrystudio::ui { enum class NativeMenuTrigger; }
 
@@ -19,6 +21,8 @@ namespace margelo::nitro::cherrystudio::ui { enum class NativeMenuTrigger; }
 #include "JNativeMenuItem.hpp"
 #include "NativeMenuCheckedState.hpp"
 #include "JNativeMenuCheckedState.hpp"
+#include "NativeMenuIcon.hpp"
+#include "JNativeMenuIcon.hpp"
 #include <string>
 #include <functional>
 #include "JFunc_void_std__string.hpp"
@@ -111,6 +115,19 @@ namespace margelo::nitro::cherrystudio::ui {
   }
 
   // Methods
-  
+  double JHybridCherryMenuViewSpec::getLongPressMinDuration() {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<double()>("getLongPressMinDuration");
+    auto __result = method(_javaPart);
+    return __result;
+  }
+  double JHybridCherryMenuViewSpec::getLongPressMaxDistance() {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<double()>("getLongPressMaxDistance");
+    auto __result = method(_javaPart);
+    return __result;
+  }
+  void JHybridCherryMenuViewSpec::showMenu() {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<void()>("showMenu");
+    method(_javaPart);
+  }
 
 } // namespace margelo::nitro::cherrystudio::ui

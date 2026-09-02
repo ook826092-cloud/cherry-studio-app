@@ -7,11 +7,6 @@ import type { CherryMessagePart } from '@/shared/data/types/message';
 import type { MessageListItem } from '../../types';
 import { UserMessage } from '../UserMessage';
 
-jest.mock('react-native-reanimated', () => {
-  const { View: MockView } = jest.requireActual('react-native');
-  return { __esModule: true, default: { View: MockView } };
-});
-
 jest.mock('../../parts/FilePart', () => {
   const { createElement } = jest.requireActual('react');
 
@@ -27,10 +22,6 @@ jest.mock('../../parts/MessageParts', () => {
     MessageParts: (props: object) => createElement('MessageParts', props),
   };
 });
-
-jest.mock('../../motion/useUserMessageSlideInStyle', () => ({
-  useUserMessageSlideInStyle: () => undefined,
-}));
 
 describe('UserMessage', () => {
   test('keeps a text-only message in the bubble', () => {
@@ -58,7 +49,13 @@ describe('UserMessage', () => {
     expect(scrollView.props.showsHorizontalScrollIndicator).toBe(false);
     // The row owns its own height; the wrapper only pins it to the user column.
     expect(attachmentContainer).toBeDefined();
-    expect(StyleSheet.flatten(scrollView.props.style)?.height).toBe(112);
+    expect(StyleSheet.flatten(scrollView.props.style)).toEqual(
+      expect.objectContaining({
+        flexGrow: 0,
+        flexShrink: 0,
+        height: 112,
+      }),
+    );
     expect(renderer.root.findAllByType('FilePart').map((node) => node.props.part)).toEqual([
       first,
       second,

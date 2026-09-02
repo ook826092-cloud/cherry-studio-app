@@ -1,6 +1,8 @@
 import ChevronDownIcon from '@cherrystudio/app-icons/icons/chevron-down';
 import ChevronUpIcon from '@cherrystudio/app-icons/icons/chevron-up';
 import {
+  Button,
+  Chip,
   ContentState,
   FieldError,
   Input,
@@ -9,11 +11,10 @@ import {
   TextField,
   useAlert,
 } from '@cherrystudio/ui/components';
-import { cn } from '@cherrystudio/ui/utils';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, type TextInputProps, View } from 'react-native';
+import { StyleSheet, Text, type TextInputProps, View } from 'react-native';
 import {
   KeyboardAwareScrollView,
   type KeyboardAwareScrollViewRef,
@@ -48,11 +49,9 @@ const EMPTY_PULL_PREVIEW: ProviderModelPullPreview = { added: [], missing: [] };
 type ProviderModelAddMode = 'manual' | 'sync';
 
 export default function ProviderModelAddScreen() {
-  const { mode, providerId, returnToProviderList, setupFlow } = useLocalSearchParams<{
+  const { mode, providerId, setupFlow } = useLocalSearchParams<{
     mode?: string;
     providerId?: string;
-    providerName?: string;
-    returnToProviderList?: string;
     setupFlow?: string;
   }>();
   const { t } = useTranslation();
@@ -72,9 +71,7 @@ export default function ProviderModelAddScreen() {
           title={t(
             setupFlow === 'true'
               ? 'settings.provider.models.setupTitle'
-              : mode === 'manual'
-                ? 'settings.provider.models.addTitle'
-                : 'settings.provider.models.pullPreviewTitle',
+              : 'settings.provider.models.addTitle',
           )}
         />
         <ContentState.Loading
@@ -87,10 +84,10 @@ export default function ProviderModelAddScreen() {
 
   return (
     <ProviderModelAddForm
+      key={provider.id}
       initialMode={mode === 'manual' ? 'manual' : 'sync'}
       isSetupFlow={setupFlow === 'true'}
       provider={provider}
-      returnToProviderList={returnToProviderList === 'true'}
     />
   );
 }
@@ -99,12 +96,10 @@ function ProviderModelAddForm({
   initialMode,
   isSetupFlow,
   provider,
-  returnToProviderList,
 }: {
   initialMode: ProviderModelAddMode;
   isSetupFlow: boolean;
   provider: Provider;
-  returnToProviderList: boolean;
 }) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -156,14 +151,14 @@ function ProviderModelAddForm({
     isSaving: isSubmitting || isApplying,
   });
   const completeFlow = useCallback(() => {
-    if (isSetupFlow || returnToProviderList) {
+    if (isSetupFlow) {
       allowNavigation();
       router.dismissTo('/settings/provider');
       return;
     }
 
     closeWithoutPrompt();
-  }, [allowNavigation, closeWithoutPrompt, isSetupFlow, returnToProviderList, router]);
+  }, [allowNavigation, closeWithoutPrompt, isSetupFlow, router]);
   const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
   const advancedSettingsScrollYRef = useRef(0);
   const advancedFieldScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -249,9 +244,6 @@ function ProviderModelAddForm({
   );
   const handleSyncSubmit = useCallback(() => {
     if (selectedIds.size === 0) {
-      if (!isSetupFlow) {
-        completeFlow();
-      }
       return;
     }
 
@@ -261,28 +253,18 @@ function ProviderModelAddForm({
     }
 
     alert.confirm({
-      confirmLabel: t('common.save'),
+      confirmLabel: t('settings.provider.models.pullApplySelected', {
+        count: selectedIds.size,
+      }),
       description: t('settings.provider.models.syncRemoveMessage', {
         count: selectedMissingCount,
       }),
       onConfirm: applySyncSelection,
       title: t('settings.provider.models.syncRemoveTitle'),
     });
-  }, [
-    alert,
-    applySyncSelection,
-    completeFlow,
-    isSetupFlow,
-    selectedIds.size,
-    selectedMissingCount,
-    t,
-  ]);
+  }, [alert, applySyncSelection, selectedIds.size, selectedMissingCount, t]);
   const isSaving = isSubmitting || isApplying;
-  const isSaveDisabled =
-    activeMode === 'manual'
-      ? isSubmitting || !canSubmit
-      : !preview || isApplying || (isSetupFlow && selectedIds.size === 0);
-  const isSyncDoneAction = activeMode === 'sync' && selectedIds.size === 0 && !isSetupFlow;
+  const isManualSubmitDisabled = isSubmitting || !canSubmit;
   // Setup hides the switch to keep first-time configuration on a single track.
   // A sync that came back with nothing to add leaves no track: a self-hosted
   // endpoint that does not serve a model list still has to be given one model
@@ -290,30 +272,19 @@ function ProviderModelAddForm({
   const showsModeTabs = !isSetupFlow || hasSyncComeBackEmpty;
   const rightActions = useMemo<HeaderToolbarAction[]>(
     () =>
-      activeMode === 'sync' && !preview
+      activeMode === 'sync'
         ? []
         : [
             {
-              accessibilityLabel: t(isSyncDoneAction ? 'common.done' : 'common.save'),
-              disabled: isSaveDisabled,
-              key: 'save-model',
-              label: isSaving
-                ? t('common.saving')
-                : t(isSyncDoneAction ? 'common.done' : 'common.save'),
-              onPress: activeMode === 'manual' ? () => void handleSubmit() : handleSyncSubmit,
+              accessibilityLabel: t('settings.provider.models.addSubmit'),
+              disabled: isManualSubmitDisabled,
+              key: 'add-model',
+              label: isSaving ? t('common.saving') : t('settings.provider.models.add'),
+              onPress: () => void handleSubmit(),
               type: 'label',
             },
           ],
-    [
-      activeMode,
-      handleSubmit,
-      handleSyncSubmit,
-      isSaveDisabled,
-      isSaving,
-      isSyncDoneAction,
-      preview,
-      t,
-    ],
+    [activeMode, handleSubmit, isManualSubmitDisabled, isSaving, t],
   );
   const modeItems = useMemo(
     () => [
@@ -360,11 +331,7 @@ function ProviderModelAddForm({
         onBack={requestClose}
         rightActions={rightActions}
         title={t(
-          isSetupFlow
-            ? 'settings.provider.models.setupTitle'
-            : activeMode === 'sync'
-              ? 'settings.provider.models.pullPreviewTitle'
-              : 'settings.provider.models.addTitle',
+          isSetupFlow ? 'settings.provider.models.setupTitle' : 'settings.provider.models.addTitle',
         )}
       />
       {showsModeTabs ? (
@@ -382,6 +349,7 @@ function ProviderModelAddForm({
           preview ? (
             <ProviderModelPullPreviewContent
               isApplying={isApplying}
+              onApply={handleSyncSubmit}
               preview={preview}
               provider={provider}
               selectedIds={selectedIds}
@@ -465,14 +433,16 @@ function ProviderModelAddForm({
                 </Text>
                 <View className="flex-row flex-wrap gap-2">
                   {providerModelAddEndpointOptions.map((option) => (
-                    <EndpointTypeChip
+                    <Chip.Selectable
+                      accessibilityLabel={t(option.labelKey)}
+                      accessibilityRole="checkbox"
+                      disabled={isSubmitting}
                       key={option.id}
-                      isDisabled={isSubmitting}
-                      isSelected={selectedEndpointTypes.has(option.id)}
-                      label={t(option.labelKey)}
-                      onPress={() => toggleEndpointType(option.id)}
-                      selectionRole="checkbox"
-                    />
+                      onSelectedChange={() => toggleEndpointType(option.id)}
+                      selected={selectedEndpointTypes.has(option.id)}
+                    >
+                      {t(option.labelKey)}
+                    </Chip.Selectable>
                   ))}
                 </View>
                 {endpointTypeError ? (
@@ -491,14 +461,20 @@ function ProviderModelAddForm({
                 </Text>
                 <View className="flex-row flex-wrap gap-2">
                   {PROVIDER_MODEL_PURPOSE_OPTIONS.map((option) => (
-                    <EndpointTypeChip
+                    <Chip.Selectable
+                      accessibilityLabel={t(option.labelKey)}
+                      accessibilityRole="radio"
+                      disabled={isSubmitting}
                       key={option.id}
-                      isDisabled={isSubmitting}
-                      isSelected={modelPurpose === option.id}
-                      label={t(option.labelKey)}
-                      onPress={() => updateModelPurpose(option.id)}
-                      selectionRole="radio"
-                    />
+                      onSelectedChange={(selected) => {
+                        if (selected) {
+                          updateModelPurpose(option.id);
+                        }
+                      }}
+                      selected={modelPurpose === option.id}
+                    >
+                      {t(option.labelKey)}
+                    </Chip.Selectable>
                   ))}
                 </View>
 
@@ -509,14 +485,20 @@ function ProviderModelAddForm({
                     </Text>
                     <View className="flex-row flex-wrap gap-2">
                       {chatEndpointTypes.map((endpointType) => (
-                        <EndpointTypeChip
+                        <Chip.Selectable
+                          accessibilityLabel={t(getProviderModelEndpointLabelKey(endpointType))}
+                          accessibilityRole="radio"
+                          disabled={isSubmitting}
                           key={endpointType}
-                          isDisabled={isSubmitting}
-                          isSelected={formState.endpointTypes[0] === endpointType}
-                          label={t(getProviderModelEndpointLabelKey(endpointType))}
-                          onPress={() => updateChatEndpointType(endpointType)}
-                          selectionRole="radio"
-                        />
+                          onSelectedChange={(selected) => {
+                            if (selected) {
+                              updateChatEndpointType(endpointType);
+                            }
+                          }}
+                          selected={formState.endpointTypes[0] === endpointType}
+                        >
+                          {t(getProviderModelEndpointLabelKey(endpointType))}
+                        </Chip.Selectable>
                       ))}
                     </View>
                   </View>
@@ -524,22 +506,23 @@ function ProviderModelAddForm({
               </View>
             ) : null}
 
-            <Pressable
+            <Button
               accessibilityLabel={t('settings.provider.models.addMoreSettings')}
-              accessibilityRole="button"
-              className="h-10 flex-row items-center justify-center gap-2 rounded-xl bg-secondary px-3 active:opacity-70 disabled:opacity-40"
+              className="h-10"
               disabled={isSubmitting}
               onPress={toggleMoreSettings}
+              size="sm"
+              variant="secondary"
             >
-              <Text className="font-medium text-foreground text-sm" numberOfLines={1}>
+              <Button.Label numberOfLines={1}>
                 {t('settings.provider.models.addMoreSettings')}
-              </Text>
+              </Button.Label>
               {showMoreSettings ? (
                 <ChevronUpIcon className="size-4 text-foreground" />
               ) : (
                 <ChevronDownIcon className="size-4 text-foreground" />
               )}
-            </Pressable>
+            </Button>
 
             {showMoreSettings ? (
               <View className="gap-3" onLayout={handleAdvancedSettingsLayout}>
@@ -658,40 +641,6 @@ function ProviderModelAddNumberField({
       onChangeText={handleChangeText}
       onFocus={onFocus}
     />
-  );
-}
-
-function EndpointTypeChip({
-  isDisabled,
-  isSelected,
-  label,
-  onPress,
-  selectionRole,
-}: {
-  isDisabled: boolean;
-  isSelected: boolean;
-  label: string;
-  onPress: () => void;
-  selectionRole: 'checkbox' | 'radio';
-}) {
-  return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole={selectionRole}
-      accessibilityState={{ checked: isSelected, disabled: isDisabled }}
-      className={cn(
-        'h-8 flex-row items-center gap-1 rounded-full px-3 active:opacity-70 disabled:opacity-40',
-        isSelected
-          ? 'border border-border-strong bg-secondary'
-          : 'border border-border bg-secondary',
-      )}
-      disabled={isDisabled}
-      onPress={onPress}
-    >
-      <Text className="font-medium text-foreground text-sm" numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 

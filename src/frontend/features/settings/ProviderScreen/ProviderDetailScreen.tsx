@@ -6,13 +6,13 @@ import { useTranslation } from 'react-i18next';
 import { Keyboard, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
+import { ProviderBrandAvatar } from '@/frontend/components/avatar';
 import { RouteHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
 import { InlineSearch, useInlineSearch } from '@/frontend/components/inlineSearch';
 import { keyboardBottomOffset } from '@/frontend/utils/constants';
 import type { UpdateProviderInput } from '@/shared/data/api/schemas/providers';
 import type { Model } from '@/shared/data/types/model';
 
-import { ProviderBrandAvatar } from '../components/ProviderAvatar';
 import { useProviderAvatar, useProviderAvatarActions } from '../components/providerAvatarStore';
 import {
   buildApiKeyEntriesFromInput,
@@ -49,24 +49,36 @@ import {
 } from './providerForm';
 
 export default function ProviderDetailSettingsScreen() {
-  const { initialTab, providerId, providerName } = useLocalSearchParams<{
-    initialTab?: string;
+  const { providerId, providerName } = useLocalSearchParams<{
     providerId?: string;
     providerName?: string;
   }>();
+
+  if (!providerId) {
+    return <Redirect href="/settings/provider" />;
+  }
+
+  return (
+    <ProviderDetailSettings key={providerId} providerId={providerId} providerName={providerName} />
+  );
+}
+
+function ProviderDetailSettings({
+  providerId,
+  providerName,
+}: {
+  providerId: string;
+  providerName?: string;
+}) {
   const { t } = useTranslation();
   const router = useRouter();
   const { alert } = useAlert();
   const { toast } = useToast();
   const providerAvatars = useProviderAvatarActions();
-  const [activeTab, setActiveTab] = useState<ProviderDetailTab>(
-    initialTab === 'models' ? 'models' : 'configuration',
-  );
+  const [activeTab, setActiveTab] = useState<ProviderDetailTab>('configuration');
   const [modelPurpose, setModelPurpose] = useState<ProviderModelPurpose>('all');
   const [isSaving, setIsSaving] = useState(false);
-  const { models, modelsQuery, provider, providerQuery } = useProviderDetailSettings(
-    providerId ?? '',
-  );
+  const { models, modelsQuery, provider, providerQuery } = useProviderDetailSettings(providerId);
   const {
     isFiltering: isModelSearchActive,
     query: modelSearchText,
@@ -91,8 +103,8 @@ export default function ProviderDetailSettingsScreen() {
     authConfigQuery,
     replaceApiKeysMutation,
     saveProviderMutation,
-  } = useProviderApiServiceQueries(providerId ?? '');
-  const storedAvatarUri = useProviderAvatar(providerId ?? '');
+  } = useProviderApiServiceQueries(providerId);
+  const storedAvatarUri = useProviderAvatar(providerId);
   const endpointTypes = useMemo(
     () => (provider ? resolveProviderFormEndpointTypes(provider) : []),
     [provider],
@@ -280,7 +292,7 @@ export default function ProviderDetailSettingsScreen() {
     },
     [isSaving, setModelSearchText],
   );
-  if (!providerId || providerQuery.isError) {
+  if (providerQuery.isError) {
     return <Redirect href="/settings/provider" />;
   }
 

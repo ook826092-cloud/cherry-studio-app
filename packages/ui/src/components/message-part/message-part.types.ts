@@ -12,16 +12,38 @@ export type MessagePartRootProps = ViewProps & {
 export type MessagePartStatusProps = {
   accessibilityLabel?: string;
   children: ReactNode;
+  expanded?: boolean;
   onPress?: () => void;
   testID?: string;
 };
 
 export type MessagePartReasoningProps = {
   children: ReactNode;
-  detailTitle: string;
+  /** Runs before a reader-initiated inline disclosure toggle. */
+  onDisclosureToggle?: () => void;
   state: 'complete' | 'running';
   statusText: string;
   testID?: string;
+};
+
+export type MessagePartProcessProps = {
+  children: ReactNode;
+  /** Runs before a reader-initiated inline disclosure toggle. */
+  onDisclosureToggle?: () => void;
+  state: 'complete' | 'running';
+  title: string;
+  testID?: string;
+};
+
+export type MessagePartToolGroupProps = {
+  children: ReactNode;
+  /** Runs before a reader-initiated inline disclosure toggle. */
+  onDisclosureToggle?: () => void;
+  state: 'complete' | 'running';
+  statusText?: string;
+  statusTone?: MessagePartTone;
+  testID?: string;
+  title: string;
 };
 
 export type MessagePartDetailProps = {
@@ -30,6 +52,7 @@ export type MessagePartDetailProps = {
   sizes?: BottomSheetSizes;
   testID?: string;
   title: string;
+  variant?: 'default' | 'source-list';
 };
 
 export type MessagePartPendingProps = {
@@ -53,9 +76,13 @@ export type MessagePartSummaryProps = {
   title: string;
 };
 
-export type MessagePartToolProps = Omit<MessagePartSummaryProps, 'onPress'> & {
+export type MessagePartToolProps = Omit<
+  MessagePartSummaryProps,
+  'icon' | 'imageSource' | 'onPress'
+> & {
   children: ReactNode;
   detailTitle?: string;
+  detailVariant?: 'default' | 'source-list';
 };
 
 export type MessagePartErrorProps = {

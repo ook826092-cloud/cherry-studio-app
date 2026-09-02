@@ -28,20 +28,16 @@ import {
   useModelPickerData,
 } from '@/frontend/components/modelPicker';
 import { useAgentApiById, useAgentMutations } from '@/frontend/hooks/agent';
-import { type ToolMentionId, toolMentions, toolMentionUrl } from '@/frontend/utils/toolMentions';
 import { AgentProtocolError } from '@/shared/contracts/agent';
 import { loggerService } from '@/shared/core/logger/LoggerService';
 
 import { useAgentChatControls } from '../runtime';
 import { ChatInputEffortOverlay } from './components/ChatInputEffortOverlay';
-import { ChatInputMenuItems } from './components/ChatInputMenuItems';
 import { useBlurComposerOnVisibleKeyboardHide } from './hooks/useBlurComposerOnVisibleKeyboardHide';
 import { useChatInputAgentModelSelection } from './hooks/useChatInputAgentModelSelection';
 import { useChatInputReasoningEfforts } from './hooks/useChatInputReasoningEfforts';
 import { useChatInputReasoningEffortSelection } from './hooks/useChatInputReasoningEffortSelection';
-import { useChatInputWebSearchSelection } from './hooks/useChatInputWebSearchSelection';
 import { toAgentInputParts } from './utils/agentInputParts';
-import { getChatInputTemporaryCapabilities } from './utils/chatInputCapabilities';
 import { getChatInputReasoningEffortSnapshot } from './utils/chatInputReasoning';
 
 type ChatInputProps = {
@@ -52,8 +48,9 @@ type ChatInputProps = {
 
 const logger = loggerService.withContext('ChatInput');
 const restingInputHeight = 32;
-const restingSendSlotWidth = restingInputHeight + 8;
-const activeToolbarGap = 12;
+const restingActionSlotWidth = restingInputHeight + 8;
+const restingSecondaryControlScale = 0.92;
+const activeToolbarGap = 16;
 const focusTransitionMotion = {
   duration: duration.base,
   easing: easing.settle,
@@ -63,10 +60,6 @@ const focusTransitionMotion = {
 export function ChatInput({ agentId, dismissKeyboardOnSend, sessionId }: ChatInputProps) {
   const { t } = useTranslation();
   const { cancel, isBusy, sendMessage } = useAgentChatControls({ agentId, sessionId });
-  const { isWebSearchEnabled, setIsWebSearchEnabled } = useChatInputWebSearchSelection({
-    agentId,
-    sessionId,
-  });
   const { agent } = useAgentApiById(agentId);
   const { updateAgent } = useAgentMutations();
   const modelPickerData = useModelPickerData({ modelType: 'text' });
@@ -104,51 +97,55 @@ export function ChatInput({ agentId, dismissKeyboardOnSend, sessionId }: ChatInp
   useBlurComposerOnVisibleKeyboardHide(inputRef);
   const focusProgress = useSharedValue(0);
   const fieldFrameHeight = useSharedValue(restingInputHeight);
-  const morphFrameStyle = useAnimatedStyle(() => ({
-    height: fieldFrameHeight.value + focusProgress.value * (activeToolbarGap + restingInputHeight),
-  }));
-  const fieldFrameStyle = useAnimatedStyle(() => ({
-    height: fieldFrameHeight.value,
-    left: 0,
-    right: interpolate(focusProgress.value, [0, 1], [restingSendSlotWidth, 0], Extrapolation.CLAMP),
-  }));
-  const controlsRowStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateY: focusProgress.value * (fieldFrameHeight.value + activeToolbarGap),
-      },
-    ],
-  }));
-  const modelControlStyle = useAnimatedStyle(() => ({
-    opacity: focusProgress.value,
-    transform: [
-      {
-        scale: interpolate(focusProgress.value, [0, 1], [0.92, 1], Extrapolation.CLAMP),
-      },
-    ],
-  }));
-  const effortControlStyle = useAnimatedStyle(() => ({
-    opacity: focusProgress.value,
-    transform: [
-      {
-        scale: interpolate(focusProgress.value, [0, 1], [0.92, 1], Extrapolation.CLAMP),
-      },
-    ],
-  }));
+  const morphFrameStyle = useAnimatedStyle(() => {
+    const progress = focusProgress.get();
+
+    return {
+      height: fieldFrameHeight.get() + progress * (activeToolbarGap + restingInputHeight),
+    };
+  });
+  const fieldFrameStyle = useAnimatedStyle(() => {
+    const progress = focusProgress.get();
+
+    return {
+      height: fieldFrameHeight.get(),
+      left: interpolate(progress, [0, 1], [restingActionSlotWidth, 0], Extrapolation.CLAMP),
+      right: interpolate(progress, [0, 1], [restingActionSlotWidth, 0], Extrapolation.CLAMP),
+    };
+  });
+  const controlsRowStyle = useAnimatedStyle(() => {
+    const progress = focusProgress.get();
+
+    return {
+      transform: [
+        {
+          translateY: progress * (fieldFrameHeight.get() + activeToolbarGap),
+        },
+      ],
+    };
+  });
+  // Keep GlassView's backdrop sampling intact: Reanimated opacity on an
+  // ancestor writes a layer alpha that permanently strips the tools' fill.
+  // The closed frame clips these controls after translation instead.
+  const secondaryControlRevealStyle = useAnimatedStyle(() => {
+    const progress = focusProgress.get();
+
+    return {
+      transform: [
+        { translateY: (1 - progress) * restingInputHeight },
+        {
+          scale: interpolate(
+            progress,
+            [0, 1],
+            [restingSecondaryControlScale, 1],
+            Extrapolation.CLAMP,
+          ),
+        },
+      ],
+    };
+  });
   const closeModelPicker = useCallback(() => setIsModelPickerOpen(false), []);
   const openModelPicker = useCallback(() => setIsModelPickerOpen(true), []);
-  const handleMentionPress = useCallback(
-    (mentionId: ToolMentionId) => {
-      const mention = toolMentions.find((candidate) => candidate.id === mentionId);
-      if (!mention) {
-        return;
-      }
-
-      inputRef.current?.insertLink(t(mention.titleKey), toolMentionUrl(mention.id));
-      inputRef.current?.insertText(' ');
-    },
-    [inputRef, t],
-  );
   const handleFieldLayout = useCallback(
     (event: LayoutChangeEvent) => {
       const nextHeight = Math.max(restingInputHeight, Math.ceil(event.nativeEvent.layout.height));
@@ -157,11 +154,11 @@ export function ChatInput({ agentId, dismissKeyboardOnSend, sessionId }: ChatInp
       }
 
       naturalFieldHeight.current = nextHeight;
-      if (isInputActive) {
+      if (isInputActiveRef.current) {
         fieldFrameHeight.set(nextHeight);
       }
     },
-    [fieldFrameHeight, isInputActive],
+    [fieldFrameHeight],
   );
   const handleInputBlur = useCallback(() => {
     if (!isInputActiveRef.current) {
@@ -193,10 +190,6 @@ export function ChatInput({ agentId, dismissKeyboardOnSend, sessionId }: ChatInp
   const handleSendPress = useCallback(
     ({ attachments, text }: ComposerSendPayload) => {
       const parts = toAgentInputParts({ attachments, text });
-      const temporaryCapabilities = getChatInputTemporaryCapabilities({
-        isWebSearchEnabled,
-        text,
-      });
       return sendMessage({
         parts,
         ...(selectedModelId ? { modelId: selectedModelId } : {}),
@@ -209,17 +202,9 @@ export function ChatInput({ agentId, dismissKeyboardOnSend, sessionId }: ChatInp
               ),
             }
           : {}),
-        ...(temporaryCapabilities.length > 0 ? { temporaryCapabilities } : {}),
       });
     },
-    [
-      isReasoningEffortSelected,
-      reasoningEffort,
-      reasoningEfforts,
-      selectedModelId,
-      sendMessage,
-      isWebSearchEnabled,
-    ],
+    [isReasoningEffortSelected, reasoningEffort, reasoningEfforts, selectedModelId, sendMessage],
   );
   const getSendErrorLabel = useCallback(
     (error: unknown) => {
@@ -271,20 +256,15 @@ export function ChatInput({ agentId, dismissKeyboardOnSend, sessionId }: ChatInp
                 pointerEvents="box-none"
                 style={controlsRowStyle}
               >
+                {/* The primary actions stay reachable before the field is focused. */}
+                <ComposerMenu />
                 <Animated.View
                   accessibilityElementsHidden={!isInputActive}
-                  className="min-w-0 shrink flex-row items-center gap-2"
+                  className="min-w-0 shrink"
                   importantForAccessibility={isInputActive ? 'auto' : 'no-hide-descendants'}
                   pointerEvents={isInputActive ? 'auto' : 'none'}
-                  style={modelControlStyle}
+                  style={secondaryControlRevealStyle}
                 >
-                  <ComposerMenu>
-                    <ChatInputMenuItems
-                      isWebSearchEnabled={isWebSearchEnabled}
-                      onMentionPress={handleMentionPress}
-                      onWebSearchChange={setIsWebSearchEnabled}
-                    />
-                  </ComposerMenu>
                   <ComposerModelPill
                     icon={
                       selectedModelItem ? (
@@ -306,7 +286,7 @@ export function ChatInput({ agentId, dismissKeyboardOnSend, sessionId }: ChatInp
                       accessibilityElementsHidden={!isInputActive}
                       importantForAccessibility={isInputActive ? 'auto' : 'no-hide-descendants'}
                       pointerEvents={isInputActive ? 'auto' : 'none'}
-                      style={effortControlStyle}
+                      style={secondaryControlRevealStyle}
                     >
                       {effortGauge}
                     </Animated.View>

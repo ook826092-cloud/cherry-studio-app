@@ -7,6 +7,7 @@ import { copyAssistantMessageText } from '../../utils/copyAssistantMessageText';
 import { AssistantMessageToolbar } from '../AssistantMessageToolbar';
 
 const mockSetStringAsync = jest.fn(async (_text: string) => undefined);
+const mockForkSession = jest.fn(async (_input: unknown) => undefined);
 const mockCopyAssistantMessageText = jest.mocked(copyAssistantMessageText);
 
 jest.mock('expo-clipboard', () => ({
@@ -15,6 +16,7 @@ jest.mock('expo-clipboard', () => ({
 
 jest.mock('@cherrystudio/app-icons/icons/check', () => () => null);
 jest.mock('@cherrystudio/app-icons/icons/copy', () => () => null);
+jest.mock('@cherrystudio/app-icons/icons/git-fork', () => () => null);
 
 jest.mock('@cherrystudio/ui/components', () => {
   const { createElement } = jest.requireActual('react');
@@ -23,6 +25,14 @@ jest.mock('@cherrystudio/ui/components', () => {
     useAlert: () => ({ alert: { show: jest.fn() } }),
   };
 });
+
+jest.mock('../../../runtime', () => ({
+  useAgentChatFork: () => mockForkSession,
+}));
+
+jest.mock('@/frontend/hooks/agent', () => ({
+  useAgentSession: () => ({ data: { title: 'Arithmetic drills' } }),
+}));
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -90,17 +100,40 @@ describe('AssistantMessageToolbar', () => {
     ).toBe('chat.messageActions.copied');
   });
 
-  test('hides the copy button without copyable text', () => {
+  test('keeps the direct branch action reachable on a message with nothing to copy', () => {
     renderToolbar(createMessage('success', '   '));
 
     expect(renderer?.root.findAllByProps({ testID: 'assistant-message-copy' })).toHaveLength(0);
-    expect(renderer?.root.findAllByProps({ testID: 'assistant-message-toolbar' })).toHaveLength(0);
+    expect(
+      renderer?.root.findAllByProps({ testID: 'assistant-message-toolbar' }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      renderer?.root.findAllByProps({ testID: 'assistant-message-fork' }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  test('forks this message from the direct branch button', () => {
+    renderToolbar(createMessage('success', 'Answer'));
+
+    const forkButton = renderer!.root.findByProps({ testID: 'assistant-message-fork' });
+    expect(forkButton.props).toMatchObject({
+      accessibilityLabel: 'chat.messageActions.fork',
+      size: 'xs',
+      variant: 'ghost',
+    });
+
+    act(() => forkButton.props.onPress());
+    expect(mockForkSession).toHaveBeenCalledWith({
+      fromMessageId: 'assistant-1',
+      sessionId: 'session-1',
+      title: 'chat.fork.sessionTitle',
+    });
   });
 
   function renderToolbar(message: MessageListItem) {
     act(() => {
       renderer = create(
-        <AssistantMessageActionsProvider isAssistantToolbarEnabled>
+        <AssistantMessageActionsProvider isAssistantToolbarEnabled sessionId="session-1">
           <AssistantMessageToolbar message={message} />
         </AssistantMessageActionsProvider>,
       );

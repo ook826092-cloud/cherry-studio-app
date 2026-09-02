@@ -1,3 +1,5 @@
+import { memo } from 'react';
+
 import type { CherryMessagePart } from '@/shared/data/types/message';
 
 import type { ResolvedCitationText } from './citations';
@@ -17,20 +19,22 @@ import { UnknownPart } from './UnknownPart';
 type MessagePartRendererProps = {
   isStreaming: boolean;
   isTextSelectionEnabled: boolean;
+  messageParts?: readonly CherryMessagePart[];
   part: CherryMessagePart;
   renderMode?: MessagePartRenderMode;
   resolvedText?: ResolvedCitationText;
 };
 
-export function MessagePartRenderer({
+export const MessagePartRenderer = memo(function MessagePartRenderer({
   isStreaming,
   isTextSelectionEnabled,
+  messageParts,
   part,
   renderMode = 'markdown',
   resolvedText,
 }: MessagePartRendererProps) {
   if (isToolMessagePart(part)) {
-    return <ToolPartRenderer part={part} />;
+    return <ToolPartRenderer messageParts={messageParts} part={part} />;
   }
 
   switch (part.type) {
@@ -85,4 +89,4 @@ export function MessagePartRenderer({
     default:
       return <UnknownPart />;
   }
-}
+});

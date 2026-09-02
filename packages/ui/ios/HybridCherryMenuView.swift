@@ -19,6 +19,22 @@ final class HybridCherryMenuView: HybridCherryMenuViewSpec {
     var trigger: NativeMenuTrigger = .tap {
         didSet { containerView.trigger = trigger }
     }
+
+    func getLongPressMinDuration() throws -> Double {
+        // Android is the only caller; iOS long press stays UIKit-owned.
+        0
+    }
+
+    func getLongPressMaxDistance() throws -> Double {
+        // Android is the only caller; iOS long press stays UIKit-owned.
+        0
+    }
+
+    func showMenu() throws {
+        // iOS recognition stays system-owned: tap menus present through the UIButton primary
+        // action and long-press menus through UIContextMenuInteraction, which cannot be
+        // presented programmatically. Android is the only caller of this method.
+    }
 }
 
 private final class CherryMenuContainerView: UIView, UIContextMenuInteractionDelegate {
@@ -122,6 +138,16 @@ private final class CherryMenuContainerView: UIView, UIContextMenuInteractionDel
         interactionHost = nil
     }
 
+    /// Resolves the contract's semantic icon token to this platform's artwork.
+    private func makeImage(for icon: NativeMenuIcon) -> UIImage? {
+        switch icon {
+        case .none:
+            return nil
+        case .branch:
+            return UIImage(systemName: "arrow.triangle.branch")
+        }
+    }
+
     private func makeMenu() -> UIMenu {
         let actions = items.map { item in
             var attributes: UIMenuElement.Attributes = []
@@ -142,7 +168,7 @@ private final class CherryMenuContainerView: UIView, UIContextMenuInteractionDel
 
             return UIAction(
                 title: item.label,
-                image: nil,
+                image: makeImage(for: item.icon),
                 identifier: UIAction.Identifier(item.id),
                 attributes: attributes,
                 state: state

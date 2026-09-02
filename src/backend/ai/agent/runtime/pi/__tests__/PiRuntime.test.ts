@@ -1550,6 +1550,7 @@ describe('PiRuntime mapping', () => {
 
   test('exposes MCP tools through deferred discovery and calls the target through its approval boundary', async () => {
     const runtime = createTestRuntime();
+    const preparedSystemPrompt = 'Host-prepared application system prompt.';
     let executedInput: unknown;
     let searchResult: unknown;
     const builtInTool: RuntimeTool = {
@@ -1639,7 +1640,10 @@ describe('PiRuntime mapping', () => {
     const events: RuntimeEvent[] = [];
     const collecting = (async () => {
       for await (const event of session.execute(
-        baseRequest('turn-deferred-discovery', { tools: [builtInTool, targetTool, deniedTool] }),
+        baseRequest('turn-deferred-discovery', {
+          instructions: preparedSystemPrompt,
+          tools: [builtInTool, targetTool, deniedTool],
+        }),
       )) {
         events.push(event);
       }
@@ -1662,8 +1666,8 @@ describe('PiRuntime mapping', () => {
       PI_TOOL_DESCRIBE_TOOL_NAME,
       PI_TOOL_CALL_TOOL_NAME,
     ]);
-    expect(holder.lastOptions?.initialState?.systemPrompt).toContain(
-      PI_DEFERRED_TOOL_DISCOVERY_SYSTEM_PROMPT,
+    expect(holder.lastOptions?.initialState?.systemPrompt).toBe(
+      `${preparedSystemPrompt}\n\n${PI_DEFERRED_TOOL_DISCOVERY_SYSTEM_PROMPT}`,
     );
     expect(searchResult).toMatchObject({
       value: {
@@ -1919,10 +1923,20 @@ describe('PiRuntime mapping', () => {
     };
     let errorDetails: unknown;
     arrange(runtime, async (context) => {
+      const describe = context.options.initialState?.tools?.find(
+        (tool) => tool.name === PI_TOOL_DESCRIBE_TOOL_NAME,
+      );
       const call = context.options.initialState?.tools?.find(
         (tool) => tool.name === PI_TOOL_CALL_TOOL_NAME,
       );
-      if (!call) throw new Error('Missing tool_call.');
+      if (!describe || !call) throw new Error('Missing deferred discovery tools.');
+      // tool_call rejects an uninspected target, so the dispatch under test has
+      // to follow the same inspect-then-call order the model is held to.
+      await describe.execute(
+        'describe-error-call',
+        { name: targetTool.providerName },
+        context.signal,
+      );
       errorDetails = (
         await call.execute(
           'catalog-error-call',

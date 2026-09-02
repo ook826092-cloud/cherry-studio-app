@@ -28,6 +28,8 @@ function snapshot(): AgentSessionSnapshot {
       agentId: 'agent-1',
       createdAt: '2026-08-25T00:00:00.000Z',
       executionTarget: { kind: 'local' },
+      forkBoundaryMessageId: null,
+      forkedFromSessionId: null,
       id: 'session-1',
       title: '',
       titleIsManual: false,
@@ -75,6 +77,7 @@ function protocolWithObservation(
   return {
     cancelTurn: jest.fn(),
     deleteSession: jest.fn(),
+    forkSession: jest.fn(),
     observeSession: jest.fn(observeSession),
     renameSession: jest.fn(),
     respondApproval: jest.fn(),
@@ -107,15 +110,12 @@ describe('AgentSessionChatClient', () => {
     protocol.startSession.mockResolvedValue(snapshot().session);
     const client = new AgentSessionChatClient(protocol);
 
-    await client.startSession('agent-1', [{ text: 'Hello', type: 'text' }], {
-      temporaryCapabilities: ['web-search'],
-    });
+    await client.startSession('agent-1', [{ text: 'Hello', type: 'text' }]);
 
     expect(protocol.startSession).toHaveBeenCalledWith({
       agentId: 'agent-1',
       executionTarget: { kind: 'local' },
       parts: [{ text: 'Hello', type: 'text' }],
-      temporaryCapabilities: ['web-search'],
     });
     expect(protocol.observeSession).toHaveBeenCalledWith('session-1', expect.any(Function));
     expect(client.getState('session-1')).toMatchObject({
@@ -148,7 +148,6 @@ describe('AgentSessionChatClient', () => {
     await client.submitMessage('session-1', [{ text: 'Hello', type: 'text' }], {
       modelId: 'provider::model-b',
       reasoningEffort: 'high',
-      temporaryCapabilities: ['web-search'],
     });
 
     expect(protocol.submitMessage).toHaveBeenCalledWith({
@@ -156,7 +155,6 @@ describe('AgentSessionChatClient', () => {
       parts: [{ text: 'Hello', type: 'text' }],
       reasoningEffort: 'high',
       sessionId: 'session-1',
-      temporaryCapabilities: ['web-search'],
     });
   });
 
@@ -201,6 +199,23 @@ describe('AgentSessionChatClient', () => {
     await client.observe('session-1');
 
     expect(onTranscriptChanged).toHaveBeenCalledWith('session-1');
+  });
+
+  test('invalidates Session queries when a user message advances conversation activity', async () => {
+    let listener: ((event: AgentEvent) => void) | undefined;
+    const protocol = protocolWithObservation(async (_sessionId, nextListener) => {
+      listener = nextListener;
+      return { snapshot: snapshot(), unsubscribe: jest.fn() };
+    });
+    const onSessionChanged = jest.fn();
+    const client = new AgentSessionChatClient(protocol, { onSessionChanged });
+    await client.observe('session-1');
+
+    listener?.({ type: 'message.created', message: userMessage() });
+    listener?.({ type: 'message.created', message: assistantMessage() });
+
+    expect(onSessionChanged).toHaveBeenCalledTimes(1);
+    expect(onSessionChanged).toHaveBeenCalledWith('session-1');
   });
 
   test('cancels the active turn with the correlated session and turn ids', async () => {

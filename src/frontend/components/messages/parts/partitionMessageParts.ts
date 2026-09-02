@@ -1,16 +1,28 @@
 import type { CherryMessagePart } from '@/shared/data/types/message';
 
+import { isProviderWebSearchToolPart, isToolMessagePart } from './tools/toolPartState';
+
 type MessageFilePart = Extract<CherryMessagePart, { type: 'file' }>;
+export type MessageProcessItem = {
+  index: number;
+  part: CherryMessagePart;
+};
+
+export type MessageBodyItem = { kind: 'part'; index: number; part: CherryMessagePart };
 
 export type PartitionedMessageParts = {
-  /** Everything rendered in transcript order, carrying its original index. */
-  body: readonly { index: number; part: CherryMessagePart }[];
+  /** The final result text, carrying its original index for citation resolution. */
+  body: readonly MessageBodyItem[];
   /** Every file in the message, shown as one row after the body. */
   files: readonly MessageFilePart[];
+  /** Every visible transcript part except the final result text. */
+  process: readonly MessageProcessItem[];
 };
 
 /**
- * Splits a message into its ordered body and the files it produced.
+ * Splits a message into its timed process, final result text, and produced
+ * files. Only the last visible text part remains in the article body; earlier
+ * prose, reasoning, and tools all belong to the process disclosure.
  *
  * Files are lifted out of the stream and shown after the answer rather than at
  * the tool call that wrote them. A deliverable buried between two blocks of
@@ -24,12 +36,17 @@ export type PartitionedMessageParts = {
  * lifts its own attachments out before rendering the bubble.
  *
  * Source parts drop out too; `SourceGroup` collects them separately.
+ *
+ * Provider-owned invisible parts do not create an empty process row. Source
+ * and file parts remain dedicated result affordances outside this split.
  */
 export function partitionMessageParts(
   parts: readonly CherryMessagePart[],
 ): PartitionedMessageParts {
-  const body: { index: number; part: CherryMessagePart }[] = [];
+  const body: MessageBodyItem[] = [];
   const files: MessageFilePart[] = [];
+  const process: MessageProcessItem[] = [];
+  const resultTextIndex = findResultTextIndex(parts);
 
   parts.forEach((part, index) => {
     if (part.type === 'source-url') {
@@ -41,8 +58,45 @@ export function partitionMessageParts(
       return;
     }
 
-    body.push({ index, part });
+    if (isInvisiblePart(part)) {
+      return;
+    }
+
+    if (index !== resultTextIndex) {
+      process.push({ index, part });
+      return;
+    }
+
+    body.push({ index, kind: 'part', part });
   });
 
-  return { body, files };
+  return { body, files, process };
+}
+
+function findResultTextIndex(parts: readonly CherryMessagePart[]): number | undefined {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (!part) continue;
+    if (part.type === 'source-url' || part.type === 'file' || isInvisiblePart(part)) {
+      continue;
+    }
+
+    if (part.type === 'text' && part.text.trim()) {
+      return index;
+    }
+
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function isInvisiblePart(part: CherryMessagePart) {
+  return (
+    (part.type === 'reasoning' && part.state !== 'streaming' && !part.text.trim()) ||
+    part.type === 'step-start' ||
+    part.type === 'source-document' ||
+    part.type === 'data-video' ||
+    (isToolMessagePart(part) && isProviderWebSearchToolPart(part))
+  );
 }

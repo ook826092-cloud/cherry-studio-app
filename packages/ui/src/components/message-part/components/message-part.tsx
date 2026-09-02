@@ -3,9 +3,11 @@ import { View } from 'react-native';
 import type { MessagePartRootProps } from '../message-part.types';
 import {
   MessagePartDetail,
+  MessagePartProcess,
   MessagePartReasoning,
   MessagePartSummary,
   MessagePartTool,
+  MessagePartToolGroup,
 } from './message-part-disclosure';
 import { MessagePartError } from './message-part-feedback';
 import { MessagePartPending } from './message-part-pending';
@@ -33,6 +35,7 @@ export const MessagePart = Object.assign(MessagePartRoot, {
   Error: MessagePartError,
   Pending: MessagePartPending,
   Placeholder: MessagePartPlaceholder,
+  Process: MessagePartProcess,
   Reasoning: MessagePartReasoning,
   SectionTitle: MessagePartSectionTitle,
   Source: MessagePartSource,
@@ -40,6 +43,7 @@ export const MessagePart = Object.assign(MessagePartRoot, {
   Summary: MessagePartSummary,
   TextSection: MessagePartTextSection,
   Tool: MessagePartTool,
+  ToolGroup: MessagePartToolGroup,
   Translation: MessagePartTranslation,
   Unknown: MessagePartUnknown,
   ValueSection: MessagePartValueSection,

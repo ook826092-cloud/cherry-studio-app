@@ -3,6 +3,8 @@ import type { DrawerContentComponentProps } from 'expo-router/drawer';
 import { type ReactNode, useMemo } from 'react';
 import { View } from 'react-native';
 
+import { useStartNewChat } from '@/frontend/components/navigation/chat';
+
 import { SidebarBody } from './components/SidebarBody';
 import { SidebarFooter } from './components/SidebarFooter';
 import { SidebarHeader } from './components/SidebarHeader';
@@ -22,6 +24,7 @@ type SidebarProps = {
  */
 function SidebarRoot({ children, navigation }: SidebarProps) {
   const router = useRouter();
+  const startNewChat = useStartNewChat();
 
   const actions = useMemo<SidebarActions>(
     () => ({
@@ -48,15 +51,15 @@ function SidebarRoot({ children, navigation }: SidebarProps) {
       },
       startNewChat: () => {
         navigation.closeDrawer();
-        router.push('/agents');
+        void startNewChat();
       },
     }),
-    [navigation, router],
+    [navigation, router, startNewChat],
   );
 
   return (
     <SidebarActionsContext value={actions}>
-      <View className="flex-1 bg-background">
+      <View className="flex-1">
         {children ?? (
           <>
             <SidebarBody />

@@ -21,6 +21,16 @@ jest.mock('expo-image', () => {
   return { Image: (props: Record<string, unknown>) => <MockView {...props} /> };
 });
 
+jest.mock('@/frontend/components/markdown', () => {
+  const { View: MockView } = jest.requireActual('react-native');
+
+  return {
+    MarkdownText: (props: Record<string, unknown>) => (
+      <MockView {...props} testID="mock-markdown-text" />
+    ),
+  };
+});
+
 jest.mock('@cherrystudio/ui/components', () => {
   const React = jest.requireActual('react');
   const { Text: MockText, View: MockView } = jest.requireActual('react-native');
@@ -34,10 +44,12 @@ jest.mock('@cherrystudio/ui/components', () => {
     typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   const Tool = ({
     children,
+    detailTitle,
     testID,
     ...props
   }: {
     children: ReactNode;
+    detailTitle?: string;
     testID: string;
     title: string;
   }) => {
@@ -50,7 +62,7 @@ jest.mock('@cherrystudio/ui/components', () => {
           <MockView
             onClose={() => setIsOpen(false)}
             testID={`${testID}-detail`}
-            title={props.title}
+            title={detailTitle ?? props.title}
           >
             {children}
           </MockView>
@@ -126,6 +138,21 @@ describe('tool message detail sheets', () => {
     expect(findByTestID('tool-part-trigger').props.title).toBe('calculator');
   });
 
+  it('renders structured generic output as a highlighted JSON block', async () => {
+    await render(
+      <GenericToolPart part={makeToolPart({ output: { answer: 42 }, toolName: 'calculator' })} />,
+    );
+
+    await act(async () => {
+      findByTestID('tool-part-trigger').props.onPress();
+    });
+
+    expect(findByTestID('mock-markdown-text').props).toMatchObject({
+      markdown: '```json\n{\n  "answer": 42\n}\n```',
+      selectable: false,
+    });
+  });
+
   it('maps a processing generic tool to the shared running state', async () => {
     await render(
       <GenericToolPart part={makeToolPart({ state: 'input-available', toolName: 'calculator' })} />,
@@ -134,6 +161,19 @@ describe('tool message detail sheets', () => {
     const trigger = findByTestID('tool-part-trigger');
     expect(trigger.props.state).toBe('running');
     expect(trigger.props.statusText).toBe('chat.tool.inputReady');
+  });
+
+  it('keeps the web fetch action free of implementation details', async () => {
+    await render(
+      <GenericToolPart
+        part={makeToolPart({
+          input: { urls: ['https://www.goldprice.org/gold-price.html'] },
+          toolName: 'web_fetch',
+        })}
+      />,
+    );
+
+    expect(findByTestID('tool-part-trigger').props.title).toBe('chat.builtinTool.web.fetch');
   });
 
   it('opens MCP tool details with the server and tool name', async () => {
@@ -175,7 +215,7 @@ describe('tool message detail sheets', () => {
     );
 
     const trigger = findByTestID('web-search-tool-part-trigger');
-    expect(trigger.props.title).toBe('Cherry Studio');
+    expect(trigger.props.title).toBe('chat.builtinTool.web.search');
     expect(trigger.props.statusText).toBe('chat.webSearch.resultCount');
     expect(findAllByTestID('web-search-tool-part-detail')).toHaveLength(0);
 
@@ -183,7 +223,9 @@ describe('tool message detail sheets', () => {
       trigger.props.onPress();
     });
 
-    expect(findByTestID('web-search-tool-part-detail').props.title).toBe('Cherry Studio');
+    expect(findByTestID('web-search-tool-part-detail').props.title).toBe(
+      'chat.webSearch.detailTitle',
+    );
     expect(findText('Cherry Studio')).not.toHaveLength(0);
   });
 
@@ -279,11 +321,6 @@ describe('tool message detail sheets', () => {
       },
       'chat.mcpTool.resourceLink',
     ],
-    [
-      'unknown content',
-      { content: [{ payload: { value: 1 }, type: 'future' }] },
-      '{\n  "payload": {\n    "value": 1\n  },\n  "type": "future"\n}',
-    ],
   ])('renders %s output instead of reporting no output', async (_name, output, expectedText) => {
     await render(
       <McpToolPart
@@ -300,6 +337,42 @@ describe('tool message detail sheets', () => {
 
     expect(findText(expectedText)).toHaveLength(1);
     expect(findText('chat.mcpTool.noOutput')).toHaveLength(0);
+  });
+
+  it('renders unknown MCP content as formatted JSON code', async () => {
+    await render(
+      <McpToolPart
+        part={makeToolPart({
+          output: { content: [{ payload: { value: 1 }, type: 'future' }] },
+          toolName: 'mcp__exa__search',
+        })}
+      />,
+    );
+
+    await act(async () => {
+      findByTestID('mcp-tool-part-trigger').props.onPress();
+    });
+
+    expect(findByTestID('mock-markdown-text').props.markdown).toBe(
+      '```json\n{\n  "payload": {\n    "value": 1\n  },\n  "type": "future"\n}\n```',
+    );
+  });
+
+  it('surfaces MCP-declared errors in the completed tool status', async () => {
+    await render(
+      <McpToolPart
+        part={makeToolPart({
+          output: {
+            content: [{ text: 'Invalid query', type: 'text' }],
+            isError: true,
+          },
+          toolName: 'mcp__exa__search',
+        })}
+      />,
+    );
+
+    expect(findByTestID('mcp-tool-part-trigger').props.statusText).toBe('chat.mcpTool.callError');
+    expect(findByTestID('mcp-tool-part-trigger').props.statusTone).toBe('danger');
   });
 
   it('renders image output without an empty text body', async () => {

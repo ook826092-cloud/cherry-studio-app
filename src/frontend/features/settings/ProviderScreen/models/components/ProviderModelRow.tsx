@@ -1,13 +1,26 @@
-import CheckIcon from '@cherrystudio/app-icons/icons/check';
+import { SelectionIndicator } from '@cherrystudio/ui/components';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Pressable, Text, View } from 'react-native';
 
 import { ModelAvatar } from '@/frontend/components/avatar';
 import type { Model } from '@/shared/data/types/model';
 import type { Provider } from '@/shared/data/types/provider';
 
-/** Most rows are one line; a distinct API model id adds one compact metadata line. */
-export const providerModelRowEstimatedHeight = 48;
+import { getProviderModelBadges, type ProviderModelBadge } from '../utils/providerModelBadges';
+import { ProviderModelBadge as ProviderModelBadgeChip } from './ProviderModelBadge';
+
+export type ProviderModelRowVariant = 'management' | 'synchronization';
+
+export const providerModelRowEstimatedHeights = {
+  management: 42,
+  synchronization: 44,
+} as const satisfies Record<ProviderModelRowVariant, number>;
+
+const providerModelBadgeLabelKeys = {
+  free: 'models.capability.free',
+  vision: 'models.capability.imageRecognition',
+} as const satisfies Record<ProviderModelBadge, string>;
 
 /**
  * One model, as both screens that list models draw it: the provider's own tab
@@ -27,6 +40,7 @@ export function ProviderModelRow({
   provider,
   selection,
   tone = 'default',
+  variant,
 }: {
   /** The row's trailing action. */
   children?: ReactNode;
@@ -45,45 +59,46 @@ export function ProviderModelRow({
   };
   /** `struck` reads as "on its way out", the way the pull screen marks a model the provider no longer serves. */
   tone?: 'default' | 'struck';
+  /** Management shows decision-useful badges; synchronization stays visually quiet. */
+  variant: ProviderModelRowVariant;
 }) {
-  const hasDistinctModelId = model.modelId.trim() !== model.name.trim();
-  const accessibilityLabel = hasDistinctModelId ? `${model.name}, ${model.modelId}` : model.name;
-  const rowClassName = className
-    ? `flex-row items-center gap-3 px-4 py-2 ${className}`
-    : 'flex-row items-center gap-3 px-4 py-2';
+  const { t } = useTranslation();
+  const badges = variant === 'management' ? getProviderModelBadges(model) : [];
+  const accessibilityDetails = badges.map((badge) => t(providerModelBadgeLabelKeys[badge]));
+  const accessibilityLabel = [model.name, ...accessibilityDetails].join(', ');
+  const rowClassName = [
+    'flex-row items-center gap-3 px-4 py-2',
+    selection ? 'min-h-11' : '',
+    className ?? '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   const content = (
     <>
       {selection ? (
-        <ProviderModelRowCheckbox
-          isDisabled={selection.isDisabled}
-          isSelected={selection.isSelected}
-        />
+        <SelectionIndicator disabled={selection.isDisabled} selected={selection.isSelected} />
       ) : null}
       {/* Unsized, so it is `BrandAvatar`'s own square — the one a provider row
           draws, and the one the picker sheet draws beside the same single line
           of text. */}
       <ModelAvatar model={model} provider={provider} />
-      <View className="min-w-0 flex-1">
-        <Text
-          className={
-            tone === 'struck'
-              ? 'text-base text-foreground line-through'
-              : 'text-base text-foreground'
-          }
-          numberOfLines={1}
-        >
-          {model.name}
-        </Text>
-        {hasDistinctModelId ? (
-          <Text
-            selectable={!selection}
-            className="text-foreground-tertiary text-xs"
-            numberOfLines={1}
-          >
-            {model.modelId}
-          </Text>
-        ) : null}
-      </View>
+      <Text
+        className={
+          tone === 'struck'
+            ? 'min-w-0 flex-1 text-base text-foreground line-through'
+            : 'min-w-0 flex-1 text-base text-foreground'
+        }
+        numberOfLines={1}
+      >
+        {model.name}
+      </Text>
+      {badges.length > 0 ? (
+        <View className="flex-row items-center gap-1">
+          {badges.map((badge) => (
+            <ProviderModelBadgeChip badge={badge} key={`${model.id}:${badge}`} />
+          ))}
+        </View>
+      ) : null}
       {children}
     </>
   );
@@ -107,28 +122,5 @@ export function ProviderModelRow({
     >
       {content}
     </Pressable>
-  );
-}
-
-/** The same tick the session list draws, since both lists select the same way. */
-function ProviderModelRowCheckbox({
-  isDisabled,
-  isSelected,
-}: {
-  isDisabled?: boolean;
-  isSelected: boolean;
-}) {
-  const disabledClassName = isDisabled ? ' opacity-40' : '';
-
-  return (
-    <View
-      className={
-        isSelected
-          ? `size-6 items-center justify-center rounded-full bg-foreground${disabledClassName}`
-          : `size-6 items-center justify-center rounded-full border-2 border-border-strong${disabledClassName}`
-      }
-    >
-      {isSelected ? <CheckIcon className="size-4 text-background" /> : null}
-    </View>
   );
 }

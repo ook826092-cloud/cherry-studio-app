@@ -69,10 +69,11 @@ parses a format or calls a service is product code and registers through the pro
 while treating thumbnail generation as a recoverable fallback. CherryUI carries no file database,
 logging, or translation dependency.
 
-`MarkdownText` is the shared GitHub-flavored Markdown renderer. It uses the streaming renderer
-while content is arriving and the enriched native renderer afterward; both receive the same theme
-tokens, syntax palette, LaTeX flags, and typography scale. Product code supplies the active font
-size step and decides how links open:
+`MarkdownText` is the shared GitHub-flavored Markdown renderer. Static content uses the enriched
+native renderer. A part that has streamed keeps the streaming renderer for its full mounted
+lifetime, including terminal state, so completion does not remount its native subtree. Both receive
+the same theme tokens, syntax palette, LaTeX flags, and typography scale. Product code supplies the
+active font size step and decides how links open:
 
 ```tsx
 <MarkdownText
@@ -107,6 +108,10 @@ translations, file identifiers, or application navigation:
   <MessagePart.Source label="Cherry Studio" onPress={openSource} url="https://cherry-ai.com" />
 </MessagePart.Tool>
 ```
+
+`MessagePart.Process` is the inline disclosure used for one total-duration row before an answer.
+The product adapter supplies its localized duration and every visible pre-result child; the
+primitive owns the quiet divider, running shimmer, disclosure state, and compact chevron.
 
 The native Storybook exposes these states under the dedicated top-level `Message Parts` section.
 `Message Parts/Playground` collects every public message-part primitive and state on one interactive
@@ -184,9 +189,10 @@ the matching icon-only padding when no label is provided. Icon-only buttons must
 need an Expo UI `Host`. The visually compact `xs` size supplies an 8-point hit slop by default so
 its effective touch target remains usable.
 
-`Section.RadioItem` is the controlled single-choice variant for grouped rows. It owns the radio
-accessibility state, selected checkmark, disclosure behavior, separators, and leading-content inset;
-the caller owns the selected value and persistence:
+`Section.RadioItem` is the controlled single-choice row. It owns the radio accessibility state,
+selected checkmark, disclosure behavior, and leading-content inset; the caller owns the selected
+value and persistence. The default grouped `Section` supplies its surface and separators. Use
+`variant="plain"` for an edge-to-edge list without the grouped surface or separators:
 
 ```tsx
 <Section>
@@ -200,6 +206,44 @@ the caller owns the selected value and persistence:
   ))}
 </Section>
 ```
+
+Use `Section.SelectItem` when a grouped settings row opens a picker. It standardizes the current
+value, optional value icon, truncation, and down disclosure indicator. Use `SelectField` for the
+same interaction in a standalone form, where it shares the border, field surface, height, disabled
+state, and pressed feedback of other form controls:
+
+```tsx
+<Section.SelectItem label="Language" onPress={openLanguagePicker} value="English" />
+
+<SelectField accessibilityLabel="Select model" onPress={openModelPicker}>
+  <SelectField.Label>Model</SelectField.Label>
+  <SelectField.Value>
+    <ModelIcon />
+    <SelectField.ValueText>Claude</SelectField.ValueText>
+  </SelectField.Value>
+</SelectField>
+```
+
+`OptionPickerBottomSheet` is the matching controlled single-choice surface. It renders an
+edge-to-edge list of `Section.RadioItem` rows without separators, changes only a newly selected
+value, and closes after any selection. The caller owns localized labels, the selected value, and
+persistence:
+
+```tsx
+<OptionPickerBottomSheet
+  onClose={closePicker}
+  onValueChange={setLanguage}
+  open={isPickerOpen}
+  options={languages}
+  selectedValue={language}
+  size="compact"
+  title="Language"
+/>
+```
+
+`SelectionIndicator` is the decorative selected/unselected mark inside a parent checkbox or radio
+row. The parent owns the accessible role, state, and press handling. Use its `overlay` variant when
+the unselected ring sits on imagery and needs a dark contrast fill.
 
 `Chip` has three explicit variants for compact metadata and filters. All three use quiet neutral
 surfaces: the background is the lightest, the border is stronger, and the label has the highest
@@ -297,35 +341,66 @@ compatible `Input` props. Its `style` prop targets the composed field container.
 also disables its visibility action. Plain inputs default to `type="text"`, and their `style` prop
 continues to target the native field.
 
-`Menu` is the shared native action menu. It accepts one trigger element and a flat, stable `items`
-array; the package owns Nitro wiring, native action dispatch, and platform gesture behavior:
+`ActionMenu` and `ContextMenu` are the shared native action menus. Each accepts one trigger element
+and a flat, stable `items` array; the package owns Nitro wiring, native action dispatch, and the
+menu's recognition ownership. Call sites express which interaction they mean by choosing the
+component instead of configuring a trigger:
 
 ```tsx
-import { Menu, type MenuItem } from '@cherrystudio/ui/components';
+import {
+  ActionMenu,
+  ContextMenu,
+  ContextMenuScrollBoundary,
+  type MenuItem,
+} from '@cherrystudio/ui/components';
 
 const items = [
   { id: 'rename', label: 'Rename', onPress: rename },
   { destructive: true, id: 'delete', label: 'Delete', onPress: remove },
 ] satisfies readonly MenuItem[];
 
-<Menu items={items} trigger="longPress">
+// A tap-triggered dropdown: the tap is button behavior the menu owns outright.
+<ActionMenu items={items}>
+  <MoreButton />
+</ActionMenu>;
+
+// A long-press contextual menu that keeps the child's normal tap behavior.
+<ContextMenu items={items}>
   <MessageRow />
-</Menu>;
+</ContextMenu>;
+
+// The scroll owner exposes drag and momentum state to every descendant context menu.
+<ContextMenuScrollBoundary>
+  {(scrollHandlers) => <ScrollView {...scrollHandlers}>{rows}</ScrollView>}
+</ContextMenuScrollBoundary>;
 ```
 
 Item IDs must be unique within a menu. `checked` is controlled; omitting it creates a regular
 action, while `false` and `true` create off and on check states. An empty array returns the child
 unchanged. Both platforms render text actions; iOS uses `UIMenu` / `UIContextMenuInteraction`, while
-Android uses `PopupMenu`. Each keeps the system style for destructive items. `tap` is for
-button-like dropdowns, and `longPress` is for contextual
-actions without taking over the child's normal tap. Expo Router page previews remain owned by
-`Link.Preview` / `Link.Menu`, not this component.
+Android uses `PopupMenu`. Each keeps the system style for destructive items. Expo Router page
+previews remain owned by `Link.Preview` / `Link.Menu`, not these components.
 
-The target priority and cancellation behavior between menu recognition and ancestor scrolling is
-documented in
-[Interaction And Gesture Arbitration](../../docs/references/interaction-and-gesture-arbitration.md)
-as `Status: design`. Verify the native interaction boundary on each supported platform when a menu
-is used inside a scroll surface.
+Wrap every scroll component containing an Android `ContextMenu` in one
+`ContextMenuScrollBoundary`. The boundary supplies drag, momentum, and touch handlers through its
+render callback without rendering another native view. Pass an existing scroll handler to the
+boundary itself when it needs to be composed with menu arbitration. A touch that only stops
+momentum stays ineligible for a context menu until that touch ends. On iOS the supplied handlers are
+forwarded unchanged because UIKit already owns menu arbitration. On Android, a custom trigger
+component must forward `accessibilityActions` and `onAccessibilityAction` to its accessible native
+target.
+
+`ContextMenu` recognition follows
+[Interaction And Gesture Arbitration](../../docs/references/interaction-and-gesture-arbitration.md):
+on iOS the system `UIContextMenuInteraction` owns the long press and its coordination with scroll
+ancestors; on Android the long press is a `react-native-gesture-handler` recognizer in the shared
+gesture arena, so committed scrolling and pan gestures cancel it, and the native view only presents
+the already-arbitrated menu. Recognition timing and touch slop come from Android
+`ViewConfiguration`, including the user's system long-press timeout. On Android the enabled items
+are also exposed as accessibility custom actions on the trigger child, so the contextual operations
+do not depend on long press; iOS accessibility stays with the system interaction. Verify changed
+gesture boundaries on a device — the arbitration reference is `Status: design` and JavaScript tests
+cannot prove recognizer timing.
 
 The native implementation is adapted from MIT-licensed Nitro menu projects. See
 [third-party-notices.md](third-party-notices.md) for the complete attribution and license text.

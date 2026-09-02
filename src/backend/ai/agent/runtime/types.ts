@@ -177,11 +177,17 @@ export type RuntimeTool = {
   description: string;
   inputSchema: RuntimeJsonValue;
   approval: 'auto' | 'ask' | 'deny';
+  /**
+   * False keeps the Agent's global auto mode from promoting this tool's `ask`
+   * (cost-bearing or permission-gated calls). Absent means eligible.
+   */
+  autoApprovalEligible?: boolean;
   execute(call: RuntimeToolCall): Promise<RuntimeToolResult>;
 };
 
 export type RuntimeExecutionRequest = {
   turnId: string;
+  /** Host-prepared application prompt: mobile Runtime rules, App language, and Agent instructions. */
   instructions: string;
   model: RuntimeModel;
   history: RuntimeHistoryTurn[];

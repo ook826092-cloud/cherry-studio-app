@@ -66,9 +66,17 @@ versioned wire design. See
 - One Session permits at most one active turn, while different Sessions may run concurrently.
 - Mobile SQLite is the complete record for mobile-originated Sessions. The retired
   Assistant/Topic/Message tables and Chat Runtime are not compatibility paths.
-- The Host combines the shared system capability catalog, turn-local composer selections, and the
-  current Agent's persisted MCP bindings into a frozen tool snapshot before each turn. An empty
-  snapshot is ordinary conversation.
+- The Host combines the shared system capability catalog, the Agent's capability-group deny-list,
+  and the current Agent's persisted MCP bindings into a frozen tool snapshot before each turn. An
+  empty snapshot is ordinary conversation.
+- The Host builds the mobile-owned application prompt for every turn. Fixed Runtime rules define
+  truthful capability use, approval and permission behavior, untrusted-content handling, mobile
+  lifecycle, and result reporting. The Host also injects the App's effective language and requires
+  responses in that language unless the user explicitly requests another one; the user-configured
+  Agent instructions remain a separate role and style section. Capability guidance is included only
+  when its supporting tool is in the frozen snapshot. Runtime adapters do not append separate
+  application policy, but may add guidance for binding-specific mechanics such as Pi's deferred MCP
+  catalog.
 - Pi owns the model → tool → result loop. Application adapters retain permission, credential,
   managed-file, and approval authority.
 - Managed image and bounded text input are resolved by the Host before execution. Arbitrary paths

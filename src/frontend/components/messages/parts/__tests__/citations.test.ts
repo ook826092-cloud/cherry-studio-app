@@ -1,8 +1,8 @@
 import type { CherryMessagePart } from '@/shared/data/types/message';
 
-import { resolveMessageCitationText } from '../citations';
+import { resolveMessageCitations } from '../citations';
 
-describe('resolveMessageCitationText', () => {
+describe('resolveMessageCitations', () => {
   test('resolves IDs from projected source URL parts', () => {
     const parts = [
       {
@@ -14,10 +14,13 @@ describe('resolveMessageCitationText', () => {
       { text: 'See [cite:aaaa1111-1].', type: 'text' },
     ] satisfies CherryMessagePart[];
 
-    expect(resolveMessageCitationText(parts).get(1)).toEqual({
-      markdown: 'See [1](https://cherry-ai.com).',
+    const citations = resolveMessageCitations(parts);
+
+    expect(citations.textByPartIndex.get(1)).toEqual({
+      markdown: 'See ^❶^.',
       plainText: 'See [1].',
     });
+    expect(citations.sourceNumberById.get('aaaa1111-1')).toBe(1);
   });
 
   test('resolves message-local tool result IDs by first marker appearance', () => {
@@ -35,10 +38,18 @@ describe('resolveMessageCitationText', () => {
       { text: 'Second [cite:aaaa1111-2], first [cite:aaaa1111-1].', type: 'text' },
     ] as CherryMessagePart[];
 
-    expect(resolveMessageCitationText(parts).get(1)).toEqual({
-      markdown: 'Second [1](https://b.example), first [2](https://a.example).',
+    const citations = resolveMessageCitations(parts);
+
+    expect(citations.textByPartIndex.get(1)).toEqual({
+      markdown: 'Second ^❶^, first ^❷^.',
       plainText: 'Second [1], first [2].',
     });
+    expect(citations.sourceNumberById).toEqual(
+      new Map([
+        ['aaaa1111-1', 2],
+        ['aaaa1111-2', 1],
+      ]),
+    );
   });
 
   test('keeps unknown markers and code examples literal', () => {
@@ -55,8 +66,8 @@ describe('resolveMessageCitationText', () => {
       },
     ] as CherryMessagePart[];
 
-    expect(resolveMessageCitationText(parts).get(1)?.markdown).toBe(
-      '`[cite:aaaa1111-1]` [cite:missing] [1](https://a.example)',
+    expect(resolveMessageCitations(parts).textByPartIndex.get(1)?.markdown).toBe(
+      '`[cite:aaaa1111-1]` [cite:missing] ^❶^',
     );
   });
 
@@ -77,6 +88,14 @@ describe('resolveMessageCitationText', () => {
       { text: 'A [cite:aaaa1111-1] B [cite:bbbb2222-1]', type: 'text' },
     ] as CherryMessagePart[];
 
-    expect(resolveMessageCitationText(parts).get(2)?.plainText).toBe('A [1] B [1]');
+    const citations = resolveMessageCitations(parts);
+
+    expect(citations.textByPartIndex.get(2)?.plainText).toBe('A [1] B [1]');
+    expect(citations.sourceNumberById).toEqual(
+      new Map([
+        ['aaaa1111-1', 1],
+        ['bbbb2222-1', 1],
+      ]),
+    );
   });
 });

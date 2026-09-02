@@ -1,4 +1,4 @@
-import { Menu, type MenuItem } from '@cherrystudio/ui/components';
+import { ContextMenu, type MenuItem } from '@cherrystudio/ui/components';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Text, View } from 'react-native';
@@ -48,7 +48,7 @@ function renderChatAssistantMessage(
           {message.model ? (
             <View className="min-w-0 shrink flex-row items-center gap-1">
               <ModelAvatar model={message.model} size={16} />
-              <Text className="min-w-0 shrink text-muted-foreground text-sm" numberOfLines={1}>
+              <Text className="min-w-0 shrink text-foreground-tertiary text-sm" numberOfLines={1}>
                 {message.model.name}
               </Text>
             </View>
@@ -120,7 +120,7 @@ export const ChatMessage = memo(function ChatMessage({
   }, [copyAssistantMessage, copyText, isMessageActionsEnabled, message.id, t]);
 
   return (
-    <Menu items={menuItems} trigger="longPress">
+    <ContextMenu items={menuItems}>
       <View className="w-full" collapsable={false}>
         {message.role === 'user' ? (
           <UserMessage message={message} />
@@ -128,6 +128,6 @@ export const ChatMessage = memo(function ChatMessage({
           renderChatAssistantMessage(isTextSelectionEnabled, message, assistantPresentation)
         )}
       </View>
-    </Menu>
+    </ContextMenu>
   );
 });

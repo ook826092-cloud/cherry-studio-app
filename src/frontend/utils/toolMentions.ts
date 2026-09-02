@@ -1,31 +1,26 @@
 /**
- * Tools a message invokes by naming them in its own text.
+ * Tools a message invoked by naming them in its own text.
  *
  * A mention is a Markdown link whose URL carries the tool id and whose text
- * carries the name the user saw: `[Create image](tool://create-image)`. The
- * mention is the durable state — the composer derives a turn-only capability
- * request from it at submit time, but does not persist a second Agent setting.
- * This is what keeps the request visible in the conversation afterwards.
+ * carries the name the user saw: `[Summarize](tool://summarize)`.
  *
  * The id lives in the URL rather than being recovered from the name, so a
  * message keeps meaning the same tool after the app's language changes, and so
  * ordinary prose that happens to contain the words is never mistaken for one.
- * The consequence is that a mention can only be inserted, never typed.
  *
- * Shared rather than owned by the composer: the input writes mentions and the
- * message list highlights them, and those are independent feature domains.
+ * The registry is intentionally empty until the composer offers mentionable
+ * actions again. Keeping the parser and an explicitly typed registry makes a
+ * future mention opt-in without restoring retired tool mentions.
  */
 
-export const TOOL_MENTION_URL_SCHEME = 'tool://';
+export type ToolMention = {
+  id: string;
+  titleKey: string;
+};
 
-export const toolMentions = [{ id: 'create-image', titleKey: 'chat.actions.createImage' }] as const;
-
-export type ToolMention = (typeof toolMentions)[number];
 export type ToolMentionId = ToolMention['id'];
 
-export function toolMentionUrl(id: ToolMentionId) {
-  return `${TOOL_MENTION_URL_SCHEME}${id}`;
-}
+export const toolMentions: readonly ToolMention[] = [];
 
 export type MentionSegment = {
   /** The tool, when this run is a mention. */

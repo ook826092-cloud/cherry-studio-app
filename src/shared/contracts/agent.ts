@@ -52,10 +52,6 @@ export const AgentExecutionTargetSchema = z.strictObject({
 });
 export type AgentExecutionTarget = z.infer<typeof AgentExecutionTargetSchema>;
 
-/** Composer-selected capabilities that apply only to one submitted turn. */
-export const AgentTemporaryCapabilitySchema = z.enum(['web-search', 'image-generation']);
-export type AgentTemporaryCapability = z.infer<typeof AgentTemporaryCapabilitySchema>;
-
 const AgentBuiltInToolRefSchema = z.strictObject({
   source: z.literal('builtin'),
   capabilityId: z.string().min(1),
@@ -144,6 +140,17 @@ export const AgentSessionViewSchema = z.strictObject({
   executionTarget: AgentExecutionTargetSchema,
   title: z.string(),
   titleIsManual: z.boolean(),
+  /**
+   * Copied-message boundary after which the fork-origin divider is rendered.
+   * Null for ordinary or pre-boundary Sessions, and cleared with fork lineage.
+   */
+  forkBoundaryMessageId: z.string().min(1).nullable(),
+  /**
+   * Fork provenance. Null for an ordinary Session, and reset to null when the
+   * source Session is deleted, so a surviving fork never cites a Session the
+   * user can no longer open.
+   */
+  forkedFromSessionId: z.string().min(1).nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -199,6 +206,7 @@ export const AgentErrorViewSchema = z
     code: z.enum([
       'AGENT_NOT_FOUND',
       'SESSION_NOT_FOUND',
+      'MESSAGE_NOT_FOUND',
       'SESSION_BUSY',
       'CAPABILITY_UNSUPPORTED',
       'ATTACHMENT_INVALID',
@@ -469,8 +477,6 @@ export const AgentSubmitMessageInputSchema = z.strictObject({
   modelId: UniqueModelIdSchema.optional(),
   /** Per-turn only; this value is never persisted back to the Agent. */
   reasoningEffort: ReasoningEffortOptionSchema.optional(),
-  /** Input-owned capabilities enabled for this turn; never persisted to the Agent. */
-  temporaryCapabilities: z.array(AgentTemporaryCapabilitySchema).max(2).optional(),
 });
 export type AgentSubmitMessageInput = z.infer<typeof AgentSubmitMessageInputSchema>;
 export const AgentStartSessionInputSchema = z.strictObject({
@@ -481,10 +487,20 @@ export const AgentStartSessionInputSchema = z.strictObject({
   modelId: UniqueModelIdSchema.optional(),
   /** Per-turn only; this value is never persisted back to the Agent. */
   reasoningEffort: ReasoningEffortOptionSchema.optional(),
-  /** Input-owned capabilities enabled for this turn; never persisted to the Agent. */
-  temporaryCapabilities: z.array(AgentTemporaryCapabilitySchema).max(2).optional(),
 });
 export type AgentStartSessionInput = z.infer<typeof AgentStartSessionInputSchema>;
+export const AgentForkSessionInputSchema = z.strictObject({
+  sessionId: z.string().min(1),
+  /** Inclusive fork point; its turn must already be terminal. */
+  fromMessageId: z.string().min(1),
+  /**
+   * Title for the new Session, defaulting to the source's. The client supplies
+   * it because any derived wording is localized copy, and the Host has no
+   * locale: it never composes user-visible text.
+   */
+  title: z.string().min(1).max(255).optional(),
+});
+export type AgentForkSessionInput = z.infer<typeof AgentForkSessionInputSchema>;
 export const AgentCancelTurnInputSchema = z.strictObject({
   sessionId: z.string().min(1),
   turnId: z.string().min(1),
@@ -518,6 +534,13 @@ export interface AgentProtocol {
 
   /** Creates the durable Session only when its first submission is admitted. */
   startSession(input: AgentStartSessionInput): Promise<AgentSessionView>;
+
+  /**
+   * Copies the transcript up to and including `fromMessageId` into a new idle
+   * Session. Turns and approvals are not copied, so the fork opens a new future
+   * without claiming to undo the side effects recorded in its history.
+   */
+  forkSession(input: AgentForkSessionInput): Promise<AgentSessionView>;
 
   submitMessage(
     input: AgentSubmitMessageInput,

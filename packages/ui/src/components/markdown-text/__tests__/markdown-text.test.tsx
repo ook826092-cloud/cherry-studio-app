@@ -52,7 +52,7 @@ describe('MarkdownText', () => {
           allowTrailingMargin: false,
           flavor: 'github',
           markdown: 'Hello',
-          md4cFlags: { latexMath: true, underline: false },
+          md4cFlags: { latexMath: true, superscript: true, underline: false },
           selectable: true,
         }),
       );
@@ -61,15 +61,29 @@ describe('MarkdownText', () => {
           paragraph: expect.objectContaining({
             color: 'foreground',
             fontSize: 20,
-            lineHeight: 26,
+            lineHeight: 28,
             marginBottom: 12,
             marginTop: 0,
           }),
-          h1: expect.objectContaining({ color: 'foreground', fontSize: 40, lineHeight: 48 }),
-          h2: expect.objectContaining({ color: 'foreground', fontSize: 32, lineHeight: 40 }),
+          h1: expect.objectContaining({ color: 'foreground', fontSize: 32, lineHeight: 40 }),
+          h2: expect.objectContaining({
+            color: 'foreground',
+            fontSize: 24,
+            lineHeight: 32,
+            marginBottom: 8,
+            marginTop: 0,
+          }),
+          list: expect.objectContaining({
+            fontSize: 20,
+            gapWidth: 10,
+            lineHeight: 28,
+            marginLeft: 8,
+            marginTop: 0,
+            markerMinWidth: 30,
+          }),
           code: expect.objectContaining({
             backgroundColor: 'inline-code',
-            borderColor: 'border',
+            borderColor: 'inline-code',
             color: 'inline-code-foreground',
             fontFamily: 'GeistMono-Regular',
             fontSize: 18,
@@ -83,14 +97,15 @@ describe('MarkdownText', () => {
             lineHeight: 28,
           }),
           math: expect.objectContaining({
-            backgroundColor: 'code-block',
+            backgroundColor: 'transparent',
             color: 'foreground',
             fontSize: 20,
-            marginBottom: 14,
-            marginTop: 4,
+            marginBottom: 12,
+            marginTop: 0,
             padding: 12,
             textAlign: 'center',
           }),
+          superscript: { baselineOffsetScale: 0.3, fontScale: 0.75 },
         }),
       );
       expect(renderer.root.findAllByType(excluded)).toHaveLength(0);
@@ -114,6 +129,27 @@ describe('MarkdownText', () => {
         keyword: mode === 'dark' ? '#C792EA' : '#A626A4',
       }),
     );
+  });
+
+  test('keeps the streaming renderer mounted when the part reaches terminal state', () => {
+    const onLinkPress = jest.fn();
+    const renderer = render(
+      <MarkdownText fontSizeStep={0} isStreaming markdown="Partial" onLinkPress={onLinkPress} />,
+    );
+
+    act(() => {
+      renderer.update(
+        <MarkdownText
+          fontSizeStep={0}
+          isStreaming={false}
+          markdown="Complete"
+          onLinkPress={onLinkPress}
+        />,
+      );
+    });
+
+    expect(renderer.root.findByType('StreamdownText').props.markdown).toBe('Complete');
+    expect(renderer.root.findAllByType('EnrichedMarkdownText')).toHaveLength(0);
   });
 });
 

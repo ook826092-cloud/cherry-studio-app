@@ -30,6 +30,14 @@ jest.mock('../MessageFileStrip', () => {
   };
 });
 
+jest.mock('../ProcessGroupPart', () => {
+  const { createElement } = jest.requireActual('react');
+
+  return {
+    ProcessGroupPart: (props: object) => createElement('ProcessGroupPart', props),
+  };
+});
+
 describe('MessageParts', () => {
   test.each([
     ['pending', true],
@@ -71,7 +79,67 @@ describe('MessageParts', () => {
       expect.objectContaining({ filename: 'report.md' }),
       expect.objectContaining({ filename: 'summary.md' }),
     ]);
-    expect(renderer.root.findByType('SourceGroup').props.parts).toEqual([source]);
+    expect(renderer.root.findByType('SourceGroup').props.parts).toEqual(message.data.parts);
+  });
+
+  test('folds intermediate text and later tool calls into the timed process', () => {
+    const toolPart = (id: string) =>
+      ({
+        input: {},
+        output: {},
+        state: 'output-available' as const,
+        toolCallId: `call-${id}`,
+        toolName: id,
+        type: 'dynamic-tool' as const,
+      }) as unknown as NonNullable<MessageListItem['data']['parts']>[number];
+    const message: MessageListItem = {
+      ...makeMessage('success'),
+      data: {
+        partKeys: ['key-text', 'key-a', 'key-b'],
+        parts: [{ text: 'Hello', type: 'text' }, toolPart('a'), toolPart('b')],
+      },
+    };
+    const renderer = render(<MessageParts isTextSelectionEnabled={false} message={message} />);
+
+    const process = renderer.root.findByType('ProcessGroupPart');
+    expect(process.props.items.map((item: { key: string }) => item.key)).toEqual([
+      'key-text',
+      'key-a',
+      'key-b',
+    ]);
+    expect(renderer.root.findAllByType('MessagePartRenderer')).toHaveLength(0);
+  });
+
+  test('folds reasoning and tools before the answer into one timed process group', () => {
+    const reasoningPart = { state: 'done' as const, text: 'Reasoning', type: 'reasoning' as const };
+    const toolPart = {
+      input: {},
+      output: {},
+      state: 'output-available' as const,
+      toolCallId: 'call-a',
+      toolName: 'a',
+      type: 'dynamic-tool' as const,
+    } as unknown as NonNullable<MessageListItem['data']['parts']>[number];
+    const message: MessageListItem = {
+      ...makeMessage('success'),
+      createdAt: '2026-09-02T00:00:00.000Z',
+      data: {
+        partKeys: ['reasoning-key', 'tool-key', 'text-key'],
+        parts: [reasoningPart, toolPart, { text: 'Answer', type: 'text' }],
+      },
+      updatedAt: '2026-09-02T00:00:16.000Z',
+    };
+
+    const renderer = render(<MessageParts isTextSelectionEnabled message={message} />);
+    const process = renderer.root.findByType('ProcessGroupPart');
+
+    expect(process.props.items.map((item: { key: string }) => item.key)).toEqual([
+      'reasoning-key',
+      'tool-key',
+    ]);
+    expect(process.props.isTextSelectionEnabled).toBe(true);
+    expect(process.props.renderMode).toBe('markdown');
+    expect(renderer.root.findAllByType('MessagePartRenderer')).toHaveLength(1);
   });
 
   test('shows a file produced mid-answer after the answer, not where it interrupted it', () => {
@@ -87,11 +155,14 @@ describe('MessageParts', () => {
     };
     const renderer = render(<MessageParts isTextSelectionEnabled={false} message={message} />);
     const rendered = renderer.root.findAll(
-      (node) => node.type === 'MessagePartRenderer' || node.type === 'MessageFileStrip',
+      (node) =>
+        node.type === 'ProcessGroupPart' ||
+        node.type === 'MessagePartRenderer' ||
+        node.type === 'MessageFileStrip',
     );
 
     expect(rendered.map((node) => node.type)).toEqual([
-      'MessagePartRenderer',
+      'ProcessGroupPart',
       'MessagePartRenderer',
       'MessageFileStrip',
     ]);

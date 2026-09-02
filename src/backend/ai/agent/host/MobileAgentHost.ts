@@ -37,6 +37,8 @@
  *     user/assistant message reservation.
  */
 
+import { getLocales } from 'expo-localization';
+
 import type { AiService } from '@/backend/ai/AiService';
 import type { McpRuntimeService } from '@/backend/ai/mcp';
 import {
@@ -59,6 +61,7 @@ import type { WebSearchService } from '@/backend/services/webSearch/WebSearchSer
 import {
   AgentCancelTurnInputSchema,
   AgentDeleteSessionInputSchema,
+  AgentForkSessionInputSchema,
   AgentRenameSessionInputSchema,
   AgentRespondApprovalInputSchema,
   AgentStartSessionInputSchema,
@@ -70,6 +73,7 @@ import {
   type AgentErrorView,
   type AgentEvent,
   type AgentExecutionTarget,
+  type AgentForkSessionInput,
   type AgentInputPart,
   type AgentMessagePart,
   type AgentMessageView,
@@ -81,6 +85,7 @@ import {
   type AgentTurnView,
 } from '@/shared/contracts/agent';
 import { loggerService } from '@/shared/core/logger/LoggerService';
+import type { LanguageVarious } from '@/shared/data/preference';
 
 import {
   managedFileResolver,
@@ -112,6 +117,7 @@ import {
 } from './agentDefinitions';
 import { AgentSessionNaming } from './AgentSessionNaming';
 import { AgentSessionUsageRecorder } from './AgentSessionUsageRecorder';
+import { buildAgentSystemPrompt, resolveAgentAppLanguage } from './agentSystemPrompt';
 import { validateRuntimeContextCheckpoint } from './contextCheckpoints';
 import { type AgentInferenceModelResolver, resolveAgentInferenceModel } from './inferenceSnapshot';
 import {
@@ -160,6 +166,7 @@ const TERMINAL_PERSISTENCE_RETRY_DELAYS_MS = [0, 50, 200] as const;
 
 type MobileAgentHostOverrides = {
   agents: AgentDefinitionSource;
+  appLanguage: () => LanguageVarious;
   files: ManagedFileResolver;
   inferenceModel: AgentInferenceModelResolver;
   naming: Pick<
@@ -253,6 +260,7 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
   >();
   private readonly runningTurns = new Set<Promise<void>>();
   private readonly files: ManagedFileResolver;
+  private readonly appLanguage: MobileAgentHostOverrides['appLanguage'];
   private readonly naming: MobileAgentHostOverrides['naming'];
   private readonly usage: MobileAgentHostOverrides['usage'];
   private readonly inferenceModel: MobileAgentHostOverrides['inferenceModel'];
@@ -276,6 +284,13 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
     private readonly overrides: Partial<MobileAgentHostOverrides> = {},
   ) {
     super();
+    this.appLanguage =
+      overrides.appLanguage ??
+      (() =>
+        resolveAgentAppLanguage(
+          this.preferenceService.readCached('app.language'),
+          getLocales()[0]?.languageCode,
+        ));
     this.files = overrides.files ?? managedFileResolver;
     this.naming =
       overrides.naming ??
@@ -437,6 +452,33 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
       }
       this.initialAdmissions.delete(admission);
       completion.resolve();
+    }
+  }
+
+  async forkSession(input: AgentForkSessionInput): Promise<AgentSessionView> {
+    const parsed = AgentForkSessionInputSchema.parse(input);
+    // A fork point must be a clean cut (agent-protocol.md "Branching" rule 1).
+    // Rejecting the whole operation while a turn is live is stricter than
+    // checking the anchor alone, and it keeps the store from silently dropping
+    // an anchor that is itself the streaming row.
+    this.assertIdle(parsed.sessionId);
+
+    const result = await this.store.forkSession(parsed);
+    switch (result.status) {
+      case 'session-not-found':
+        fail('SESSION_NOT_FOUND', `Session does not exist: ${parsed.sessionId}`);
+        break;
+      case 'message-not-found':
+        fail(
+          'MESSAGE_NOT_FOUND',
+          `Message does not exist in this session: ${parsed.fromMessageId}`,
+        );
+        break;
+      case 'fork-point-unsettled':
+        fail('SESSION_BUSY', 'The fork point has not settled yet.');
+        break;
+      case 'forked':
+        return result.session;
     }
   }
 
@@ -723,7 +765,11 @@ export class MobileAgentHost extends BaseService implements AgentProtocol {
       state.abortController.signal.throwIfAborted();
       const events = state.runtimeSession.execute({
         turnId: state.turn.id,
-        instructions: plan.agent.instructions,
+        instructions: buildAgentSystemPrompt({
+          agentInstructions: plan.agent.instructions,
+          appLanguage: this.appLanguage(),
+          tools: plan.tools,
+        }),
         model: plan.agent.model,
         history: toRuntimeHistory(plan.history, runtimeAttachments),
         contextCheckpoint: plan.runtimeContextCheckpoint,

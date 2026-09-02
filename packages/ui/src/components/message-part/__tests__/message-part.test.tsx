@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Text } from 'react-native';
+import { Text, View } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { MessagePart } from '..';
@@ -7,6 +7,10 @@ import { formatMessagePartValue, hasMessagePartValue } from '../utils/message-pa
 
 let mockBottomSheetProps: Record<string, unknown> = {};
 
+jest.mock(
+  '@cherrystudio/app-icons/icons/chevron-down',
+  () => jest.requireActual('react-native').View,
+);
 jest.mock(
   '@cherrystudio/app-icons/icons/chevron-right',
   () => jest.requireActual('react-native').View,
@@ -34,7 +38,6 @@ jest.mock('@cherrystudio/app-icons/icons/triangle-alert', () => {
     return <MockView {...props} testID="unknown-warning-icon" />;
   };
 });
-jest.mock('@cherrystudio/app-icons/icons/wrench', () => jest.requireActual('react-native').View);
 
 jest.mock('../../bottom-sheet', () => {
   const { View } = jest.requireActual('react-native');
@@ -59,6 +62,18 @@ jest.mock('../../loading', () => {
   return { DotMatrixSquare20: View, PrismSweep: View };
 });
 
+jest.mock('../../shimmer-text', () => {
+  const { Text: MockText } = jest.requireActual('react-native');
+
+  return {
+    ShimmerText: ({ children, ...props }: { children: string }) => (
+      <MockText {...props} accessibilityHint="shimmer">
+        {children}
+      </MockText>
+    ),
+  };
+});
+
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 59 }),
 }));
@@ -81,6 +96,8 @@ jest.mock('react-native-reanimated', () => {
     __esModule: true,
     cancelAnimation: jest.fn(),
     default: { View },
+    Easing: { bezier: () => 'bezier', linear: 'linear' },
+    ReduceMotion: { System: 'system' },
     useAnimatedStyle: (factory: () => object) => factory(),
     useReducedMotion: () => false,
     useSharedValue,
@@ -88,6 +105,13 @@ jest.mock('react-native-reanimated', () => {
     withTiming: (value: number) => value,
   };
 });
+
+jest.mock('react-native-worklets', () => ({
+  scheduleOnRN: (callback: () => void) => callback(),
+}));
+
+const findRenderedByTestId = (renderer: ReactTestRenderer, testID: string) =>
+  renderer.root.findAllByType(View).filter((node) => node.props.testID === testID);
 
 describe('MessagePart', () => {
   let renderer: ReactTestRenderer | undefined;
@@ -116,7 +140,8 @@ describe('MessagePart', () => {
     });
 
     expect(renderer!.root.findAllByProps({ testID: 'search-detail' })).toHaveLength(0);
-    act(() => renderer!.root.findByProps({ testID: 'search-trigger' }).props.onPress());
+    const trigger = renderer!.root.findByProps({ testID: 'search-trigger' });
+    act(() => trigger.props.onPress());
 
     const detail = renderer!.root.findByProps({ testID: 'search-detail' });
     expect(mockBottomSheetProps.sizes).toEqual(['compact', 'large']);
@@ -126,11 +151,12 @@ describe('MessagePart', () => {
     expect(renderer!.root.findAllByProps({ testID: 'search-detail' })).toHaveLength(0);
   });
 
-  it('opens running reasoning details without changing the caller content', () => {
+  it('expands running reasoning inline instead of opening a sheet', () => {
+    const onDisclosureToggle = jest.fn();
     act(() => {
       renderer = create(
         <MessagePart.Reasoning
-          detailTitle="Reasoning"
+          onDisclosureToggle={onDisclosureToggle}
           state="running"
           statusText="Thinking for 1.2s"
           testID="thinking"
@@ -140,14 +166,41 @@ describe('MessagePart', () => {
       );
     });
 
-    expect(renderer!.root.findByProps({ active: true })).toBeDefined();
-    expect(renderer!.root.findAllByProps({ testID: 'thinking-detail' })).toHaveLength(0);
+    expect(findRenderedByTestId(renderer!, 'thinking-detail')).toHaveLength(0);
     act(() => renderer!.root.findByProps({ testID: 'thinking-trigger' }).props.onPress());
-    expect(mockBottomSheetProps.size).toBe('large');
+    expect(mockBottomSheetProps).toEqual({});
+    expect(onDisclosureToggle).toHaveBeenCalledTimes(1);
+    expect(findRenderedByTestId(renderer!, 'thinking-detail')).toHaveLength(1);
     expect(renderer!.root.findByProps({ children: 'Live reasoning' })).toBeDefined();
+
+    act(() => renderer!.root.findByProps({ testID: 'thinking-trigger' }).props.onPress());
+    expect(onDisclosureToggle).toHaveBeenCalledTimes(2);
+    expect(findRenderedByTestId(renderer!, 'thinking-detail')).toHaveLength(0);
   });
 
-  it('pulses the complete running tool trigger without removing its status text', () => {
+  it('keeps the total process duration folded until the reader expands it', () => {
+    const onDisclosureToggle = jest.fn();
+    act(() => {
+      renderer = create(
+        <MessagePart.Process
+          onDisclosureToggle={onDisclosureToggle}
+          state="complete"
+          testID="process"
+          title="Took 16s"
+        >
+          <Text>Reasoning and tools</Text>
+        </MessagePart.Process>,
+      );
+    });
+
+    expect(findRenderedByTestId(renderer!, 'process-detail')).toHaveLength(0);
+    act(() => renderer!.root.findByProps({ testID: 'process-trigger' }).props.onPress());
+    expect(onDisclosureToggle).toHaveBeenCalledTimes(1);
+    expect(findRenderedByTestId(renderer!, 'process-detail')).toHaveLength(1);
+    expect(renderer!.root.findByProps({ children: 'Reasoning and tools' })).toBeDefined();
+  });
+
+  it('shimmers the running tool title without removing its status text', () => {
     act(() => {
       renderer = create(
         <MessagePart.Tool
@@ -161,8 +214,65 @@ describe('MessagePart', () => {
       );
     });
 
-    expect(renderer!.root.findByProps({ testID: 'searching-running-trigger' })).toBeDefined();
+    expect(renderer!.root.findByProps({ testID: 'searching-running-title' })).toBeDefined();
     expect(renderer!.root.findByProps({ children: 'Searching' })).toBeDefined();
+  });
+
+  it('keeps a running tool group expanded and folds it once complete', () => {
+    const steps = (
+      <>
+        <Text>step one</Text>
+        <Text>step two</Text>
+      </>
+    );
+    act(() => {
+      renderer = create(
+        <MessagePart.ToolGroup state="running" testID="group" title="Working with tools…">
+          {steps}
+        </MessagePart.ToolGroup>,
+      );
+    });
+
+    // Live run: steps visible without any press, title shimmering.
+    expect(findRenderedByTestId(renderer!, 'group-steps')).toHaveLength(1);
+    expect(renderer!.root.findByProps({ accessibilityHint: 'shimmer' }).props.children).toBe(
+      'Working with tools…',
+    );
+
+    act(() => {
+      renderer!.update(
+        <MessagePart.ToolGroup state="complete" testID="group" title="Used 2 tools">
+          {steps}
+        </MessagePart.ToolGroup>,
+      );
+    });
+
+    // Settled run folds to its summary until the reader asks for the steps.
+    expect(findRenderedByTestId(renderer!, 'group-steps')).toHaveLength(0);
+    act(() => renderer!.root.findByProps({ testID: 'group-trigger' }).props.onPress());
+    expect(findRenderedByTestId(renderer!, 'group-steps')).toHaveLength(1);
+  });
+
+  it('lets a manual toggle override the running default of a tool group', () => {
+    act(() => {
+      renderer = create(
+        <MessagePart.ToolGroup
+          state="running"
+          statusText="1 failed"
+          statusTone="danger"
+          testID="group"
+          title="Working with tools…"
+        >
+          <Text>step</Text>
+        </MessagePart.ToolGroup>,
+      );
+    });
+
+    act(() => renderer!.root.findByProps({ testID: 'group-trigger' }).props.onPress());
+    expect(findRenderedByTestId(renderer!, 'group-steps')).toHaveLength(0);
+    expect(renderer!.root.findByProps({ children: '1 failed' }).props.className).toContain(
+      'text-destructive',
+    );
   });
 
   it('renders the pending response as an active, accessible status row', () => {

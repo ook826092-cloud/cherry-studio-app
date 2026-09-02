@@ -1,6 +1,6 @@
 import { ContentState, useAlert } from '@cherrystudio/ui/components';
 import { useHeaderHeight } from 'expo-router/react-navigation';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
 
@@ -11,11 +11,13 @@ import { loggerService } from '@/shared/core/logger/LoggerService';
 
 import { type PendingToolApproval, ToolApprovalSheet } from '../approval/ToolApprovalSheet';
 import {
+  createAgentMessageListProjectionCache,
   mergeAgentMessageViews,
   toAgentMessageListItems,
   useAgentChatActions,
   useAgentChatSession,
 } from '../runtime';
+import { ChatForkOriginDivider } from './components/ChatForkOriginDivider';
 import { ChatInitialRenderCover } from './components/ChatInitialRenderCover';
 import { ChatMessage } from './components/ChatMessage';
 import { ChatOlderMessagesIndicator } from './components/ChatOlderMessagesIndicator';
@@ -26,16 +28,18 @@ import {
 } from './hooks/useMessageListInitialRenderGate';
 
 const logger = loggerService.withContext('AgentChatWorkspace');
-const gateLog = loggerService.withContext('AgentChatGate');
 
 type ChatWorkspaceProps = {
   assistantAvatarUri?: null | string;
   assistantName?: string;
   isAssistantToolbarEnabled: boolean;
   contentBottomInset: number;
+  /** Copied message inside this Session that closes the inherited prefix. */
+  forkBoundaryMessageId?: string;
+  /** Direct source Session named by the fork-origin divider. */
+  forkedFromSessionId?: string;
   keyboardOffset: number;
   messageWindow: AgentMessageHistoryWindow;
-  renderGateKey: string;
   sessionId: string;
 };
 
@@ -43,9 +47,10 @@ export function ChatWorkspace({
   assistantAvatarUri,
   assistantName,
   contentBottomInset,
+  forkBoundaryMessageId,
+  forkedFromSessionId,
   keyboardOffset,
   messageWindow,
-  renderGateKey,
   isAssistantToolbarEnabled,
   sessionId,
 }: ChatWorkspaceProps) {
@@ -59,7 +64,42 @@ export function ChatWorkspace({
     () => mergeAgentMessageViews(messages, live.liveMessages),
     [live.liveMessages, messages],
   );
-  const listMessages = useMemo(() => toAgentMessageListItems(mergedMessages), [mergedMessages]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- sessionId keys the cache lifetime, not its contents
+  const projectionCache = useMemo(() => createAgentMessageListProjectionCache(), [sessionId]);
+  const projectedMessages = useMemo(
+    () => toAgentMessageListItems(mergedMessages, projectionCache),
+    [mergedMessages, projectionCache],
+  );
+  const listMessages = useMemo(() => {
+    if (!forkBoundaryMessageId || !forkedFromSessionId) {
+      return projectedMessages;
+    }
+    const boundaryIndex = projectedMessages.findIndex(
+      (message) => message.id === forkBoundaryMessageId,
+    );
+    if (boundaryIndex < 0) {
+      // Pagination has not loaded the persisted boundary yet. Rendering no
+      // divider is more accurate than attaching it to the current page edge.
+      return projectedMessages;
+    }
+    const boundary = projectedMessages[boundaryIndex];
+    if (!boundary) {
+      return projectedMessages;
+    }
+    const forkOriginItem = {
+      createdAt: boundary.createdAt,
+      data: {},
+      id: `fork-origin:${sessionId}`,
+      role: 'system',
+      status: 'success',
+      systemEvent: { sourceSessionId: forkedFromSessionId, type: 'fork-origin' },
+    } satisfies MessageListItem;
+    return [
+      ...projectedMessages.slice(0, boundaryIndex + 1),
+      forkOriginItem,
+      ...projectedMessages.slice(boundaryIndex + 1),
+    ];
+  }, [forkBoundaryMessageId, forkedFromSessionId, projectedMessages, sessionId]);
   const assistantPresentation = useMemo(
     () => ({
       avatarUri: assistantAvatarUri,
@@ -68,13 +108,21 @@ export function ChatWorkspace({
     [assistantAvatarUri, assistantName, t],
   );
   const renderChatMessage = useCallback(
-    (message: MessageListItem) => (
-      <ChatMessage
-        assistantPresentation={assistantPresentation}
-        isMessageActionsEnabled={isAssistantToolbarEnabled}
-        message={message}
-      />
-    ),
+    (message: MessageListItem) => {
+      if (message.role === 'system') {
+        return message.systemEvent?.type === 'fork-origin' ? (
+          <ChatForkOriginDivider sourceSessionId={message.systemEvent.sourceSessionId} />
+        ) : null;
+      }
+
+      return (
+        <ChatMessage
+          assistantPresentation={assistantPresentation}
+          isMessageActionsEnabled={isAssistantToolbarEnabled}
+          message={message}
+        />
+      );
+    },
     [assistantPresentation, isAssistantToolbarEnabled],
   );
   const messageListExtraData = useMemo(
@@ -112,20 +160,11 @@ export function ChatWorkspace({
     isLoadingInitial,
     messageCount: messages.length,
   });
-  const { isCoverVisible, listRenderKey, markListLoaded } = useMessageListInitialRenderGate({
-    renderGateKey,
+  const { isCoverVisible, markListLoaded } = useMessageListInitialRenderGate({
+    renderGateKey: sessionId,
     requiresInitialHistoryLayout,
   });
   const contentTopInset = resolveHeaderContentInset(headerHeight);
-
-  useEffect(() => {
-    gateLog.debug('[GATE] state', {
-      isLoadingInitial,
-      isCoverVisible,
-      len: listMessages.length,
-      t: Date.now(),
-    });
-  }, [isLoadingInitial, isCoverVisible, listMessages.length]);
 
   if (error && !isLoadingInitial && listMessages.length === 0) {
     return (
@@ -138,18 +177,20 @@ export function ChatWorkspace({
   }
 
   return (
-    <View className="flex-1 bg-background">
+    <View className="flex-1 bg-chat-background">
       <ChatOlderMessagesIndicator isLoading={isLoadingOlder} />
       <AssistantMessageActionsProvider
-        key={sessionId}
+        key={`assistant-actions-${sessionId}`}
         isAssistantToolbarEnabled={isAssistantToolbarEnabled}
+        sessionId={sessionId}
       >
         <MessageList
-          key={listRenderKey}
           contentBottomInset={contentBottomInset}
           contentTopInset={contentTopInset}
+          dataKey={sessionId}
           enteringMessageId={live.enteringUserMessageId}
           extraData={messageListExtraData}
+          initialLayoutReady={!requiresInitialHistoryLayout || !isLoadingInitial}
           keyboardOffset={keyboardOffset}
           messages={listMessages}
           onLoadOlder={loadOlder}
@@ -159,6 +200,7 @@ export function ChatWorkspace({
       </AssistantMessageActionsProvider>
       <ChatInitialRenderCover isVisible={isCoverVisible} />
       <ToolApprovalSheet
+        key={`tool-approval-${sessionId}`}
         approvals={pendingApprovals}
         isOpen={pendingApprovals.length > 0}
         onRespond={handleApprovalRespond}

@@ -1,4 +1,3 @@
-import CheckIcon from '@cherrystudio/app-icons/icons/check';
 import ImageIcon from '@cherrystudio/app-icons/icons/image';
 import RotateCcwIcon from '@cherrystudio/app-icons/icons/rotate-ccw';
 import {
@@ -6,6 +5,7 @@ import {
   ContentState,
   Image,
   ImageGenerationLoader,
+  SelectionIndicator,
   Section,
   useAlert,
 } from '@cherrystudio/ui/components';
@@ -234,7 +234,7 @@ export function DrawingList() {
   const listData = paintings.isLoading || gallery.isLoading ? [] : visibleGalleryItems;
 
   return (
-    <View className="flex-1 bg-background">
+    <View className="flex-1">
       <FlashList
         contentContainerStyle={contentContainerStyle}
         contentInsetAdjustmentBehavior="automatic"
@@ -452,13 +452,7 @@ function DrawingGridItem({
           entering={FadeIn.duration(160)}
           exiting={FadeOut.duration(120)}
         >
-          {isSelected ? (
-            <View className="size-6 items-center justify-center rounded-full bg-foreground">
-              <CheckIcon className="size-4 text-background" />
-            </View>
-          ) : (
-            <View className="size-6 rounded-full border-2 border-border-strong bg-constant-black/30" />
-          )}
+          <SelectionIndicator selected={isSelected} variant="overlay" />
         </Animated.View>
       </Pressable>
     );

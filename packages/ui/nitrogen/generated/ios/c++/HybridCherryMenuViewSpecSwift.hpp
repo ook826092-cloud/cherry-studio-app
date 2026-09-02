@@ -16,12 +16,15 @@ namespace CherryStudioUI { class HybridCherryMenuViewSpec_cxx; }
 namespace margelo::nitro::cherrystudio::ui { struct NativeMenuItem; }
 // Forward declaration of `NativeMenuCheckedState` to properly resolve imports.
 namespace margelo::nitro::cherrystudio::ui { enum class NativeMenuCheckedState; }
+// Forward declaration of `NativeMenuIcon` to properly resolve imports.
+namespace margelo::nitro::cherrystudio::ui { enum class NativeMenuIcon; }
 // Forward declaration of `NativeMenuTrigger` to properly resolve imports.
 namespace margelo::nitro::cherrystudio::ui { enum class NativeMenuTrigger; }
 
 #include "NativeMenuItem.hpp"
 #include <vector>
 #include "NativeMenuCheckedState.hpp"
+#include "NativeMenuIcon.hpp"
 #include <string>
 #include <functional>
 #include "NativeMenuTrigger.hpp"
@@ -96,7 +99,28 @@ namespace margelo::nitro::cherrystudio::ui {
 
   public:
     // Methods
-    
+    inline double getLongPressMinDuration() override {
+      auto __result = _swiftPart.getLongPressMinDuration();
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
+    inline double getLongPressMaxDistance() override {
+      auto __result = _swiftPart.getLongPressMaxDistance();
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
+    inline void showMenu() override {
+      auto __result = _swiftPart.showMenu();
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+    }
 
   private:
     CherryStudioUI::HybridCherryMenuViewSpec_cxx _swiftPart;

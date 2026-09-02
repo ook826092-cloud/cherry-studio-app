@@ -1,10 +1,12 @@
+import { useMemo } from 'react';
 import { View } from 'react-native';
 
 import type { MessageListItem } from '../types';
-import { resolveMessageCitationText } from './citations';
+import { resolveMessageCitations } from './citations';
 import { MessageFileStrip } from './MessageFileStrip';
 import { MessagePartRenderer } from './MessagePartRenderer';
 import { partitionMessageParts } from './partitionMessageParts';
+import { ProcessGroupPart } from './ProcessGroupPart';
 import { SourceGroup } from './SourceGroup';
 
 type MessagePartsProps = {
@@ -20,7 +22,7 @@ function getMessagePartKey(
   part: NonNullable<MessageListItem['data']['parts']>[number],
   index: number,
 ) {
-  return `${message.id}-${part.type}-${index}`;
+  return message.data.partKeys?.[index] ?? `${message.id}-${part.type}-${index}`;
 }
 
 export function MessageParts({
@@ -29,28 +31,47 @@ export function MessageParts({
   renderMode = 'markdown',
 }: MessagePartsProps) {
   const parts = message.data.parts;
+  // Parts keep their identity across renders (see the projection cache), so the
+  // resolved text and source-number map stay stable for their consumers too.
+  const citations = useMemo(() => resolveMessageCitations(parts ?? []), [parts]);
 
   if (!parts?.length) {
     return null;
   }
 
-  const citationText = resolveMessageCitationText(parts);
-  const { body, files } = partitionMessageParts(parts);
-  const sourceParts = parts.filter((part) => part.type === 'source-url');
+  const { body, files, process } = partitionMessageParts(parts);
+  const hasSources = parts.some((part) => part.type === 'source-url');
 
   return (
     <View className="gap-2">
-      {body.map(({ index, part }) => (
+      {process.length > 0 ? (
+        <ProcessGroupPart
+          citationText={citations.textByPartIndex}
+          isTextSelectionEnabled={isTextSelectionEnabled}
+          items={process.map(({ index, part }) => ({
+            index,
+            key: getMessagePartKey(message, part, index),
+            part,
+          }))}
+          message={message}
+          messageParts={parts}
+          renderMode={renderMode}
+        />
+      ) : null}
+      {body.map((item) => (
         <MessagePartRenderer
           isStreaming={message.status === 'pending'}
           isTextSelectionEnabled={isTextSelectionEnabled}
-          key={getMessagePartKey(message, part, index)}
-          part={part}
+          key={getMessagePartKey(message, item.part, item.index)}
+          messageParts={parts}
+          part={item.part}
           renderMode={renderMode}
-          resolvedText={citationText.get(index)}
+          resolvedText={citations.textByPartIndex.get(item.index)}
         />
       ))}
-      {sourceParts.length > 0 ? <SourceGroup parts={sourceParts} /> : null}
+      {hasSources ? (
+        <SourceGroup citationNumberBySourceId={citations.sourceNumberById} parts={parts} />
+      ) : null}
       {/* Last, so the files a turn produced are the closest thing to the end of
           the message and stay put as the answer above them streams in. */}
       {files.length > 0 ? <MessageFileStrip parts={files} /> : null}

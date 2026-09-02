@@ -3,6 +3,8 @@
 package com.margelo.nitro.cherrystudio.ui
 
 import android.content.Context
+import android.graphics.drawable.Drawable
+import android.os.Build
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -11,6 +13,7 @@ import android.view.GestureDetector
 import android.view.Menu
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.PopupMenu
 import androidx.annotation.Keep
@@ -19,11 +22,13 @@ import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.events.NativeGestureUtil
 
 private class MenuFrameLayout(context: Context) : FrameLayout(context) {
-    var onLongPress: (() -> Unit)? = null
     var onTap: (() -> Unit)? = null
     private var isMenuGestureActive = false
     private var isNativeGestureActive = false
 
+    // Tap triggers are button behavior the menu may own outright. Long press competes with
+    // scrolling and pan gestures, so its recognition lives in the shared gesture arena on the
+    // JavaScript side; this view only presents through showMenu().
     private val gestureDetector = GestureDetector(
         context,
         object : GestureDetector.SimpleOnGestureListener() {
@@ -34,22 +39,20 @@ private class MenuFrameLayout(context: Context) : FrameLayout(context) {
                 activateMenu(event, handler)
                 return true
             }
-
-            override fun onLongPress(event: MotionEvent) {
-                onLongPress?.let { activateMenu(event, it) }
-            }
         },
     )
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (onTap == null) {
+            return super.dispatchTouchEvent(event)
+        }
+
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             isMenuGestureActive = false
             isNativeGestureActive = false
-            if (onTap != null) {
-                // RootView sees ACTION_UP before descendants do. Claim tap-trigger gestures on
-                // DOWN so a wrapped React Pressable cannot release before the menu takes over.
-                startNativeGesture(event)
-            }
+            // RootView sees ACTION_UP before descendants do. Claim tap-trigger gestures on
+            // DOWN so a wrapped React Pressable cannot release before the menu takes over.
+            startNativeGesture(event)
         }
 
         gestureDetector.onTouchEvent(event)
@@ -77,9 +80,6 @@ private class MenuFrameLayout(context: Context) : FrameLayout(context) {
 
     private fun activateMenu(event: MotionEvent, handler: () -> Unit) {
         isMenuGestureActive = true
-        // Long-press claims RN's root responder here; tap already claimed it on DOWN. Both still
-        // cancel the native child that received the gesture stream.
-        startNativeGesture(event)
         MotionEvent.obtain(event).also { cancelEvent ->
             cancelEvent.action = MotionEvent.ACTION_CANCEL
             super.dispatchTouchEvent(cancelEvent)
@@ -137,14 +137,28 @@ class HybridCherryMenuView(
     private fun updateTrigger() {
         when (trigger) {
             NativeMenuTrigger.TAP -> {
-                containerView.onLongPress = null
                 containerView.onTap = ::showPopupMenu
             }
+            // A long-press menu never recognizes its own trigger on Android: the shared gesture
+            // arena arbitrates the long press against scrolling and pans, then calls showMenu().
             NativeMenuTrigger.LONGPRESS -> {
                 containerView.onTap = null
-                containerView.onLongPress = ::showPopupMenu
             }
         }
+    }
+
+    override fun getLongPressMinDuration(): Double =
+        ViewConfiguration.getLongPressTimeout().toDouble()
+
+    override fun getLongPressMaxDistance(): Double {
+        val touchSlop = ViewConfiguration.get(containerView.context).scaledTouchSlop
+        val density = containerView.resources.displayMetrics.density
+        return (touchSlop / density).toDouble()
+    }
+
+    override fun showMenu() {
+        // Hybrid methods arrive on the JS thread; PopupMenu must be shown from the UI thread.
+        containerView.post(::showPopupMenu)
     }
 
     private fun showPopupMenu() {
@@ -153,6 +167,7 @@ class HybridCherryMenuView(
         currentPopup?.dismiss()
         val popup = PopupMenu(containerView.context, containerView)
         val itemIds = mutableMapOf<Int, String>()
+        var hasIcon = false
 
         items.forEachIndexed { index, item ->
             val title =
@@ -163,7 +178,17 @@ class HybridCherryMenuView(
                 menuItem.isCheckable = true
                 menuItem.isChecked = item.checked == NativeMenuCheckedState.ON
             }
+            resolveIcon(item.icon)?.let { icon ->
+                menuItem.icon = icon
+                hasIcon = true
+            }
             itemIds[index] = item.id
+        }
+
+        // PopupMenu hides icons unless asked; the opt-in only exists from Q on,
+        // and older devices degrade to a text-only menu rather than crashing.
+        if (hasIcon && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            popup.setForceShowIcon(true)
         }
 
         popup.setOnMenuItemClickListener { menuItem ->
@@ -180,21 +205,36 @@ class HybridCherryMenuView(
         popup.show()
     }
 
+    /** Resolves the contract's semantic icon token to this platform's artwork. */
+    private fun resolveIcon(icon: NativeMenuIcon): Drawable? {
+        val resourceId =
+            when (icon) {
+                NativeMenuIcon.NONE -> return null
+                NativeMenuIcon.BRANCH -> R.drawable.cherry_menu_icon_branch
+            }
+
+        return containerView.context.getDrawable(resourceId)?.mutate()?.apply {
+            setTint(resolveColor(android.R.attr.textColorPrimary, android.R.color.black))
+        }
+    }
+
     private fun destructiveTitle(label: String): CharSequence =
         SpannableString(label).apply {
             setSpan(
-                ForegroundColorSpan(resolveDestructiveColor()),
+                ForegroundColorSpan(
+                    resolveColor(android.R.attr.colorError, android.R.color.holo_red_dark),
+                ),
                 0,
                 length,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
             )
         }
 
-    private fun resolveDestructiveColor(): Int {
+    private fun resolveColor(themeAttribute: Int, fallbackColor: Int): Int {
         val color = TypedValue()
         val context = containerView.context
-        if (!context.theme.resolveAttribute(android.R.attr.colorError, color, true)) {
-            return context.getColor(android.R.color.holo_red_dark)
+        if (!context.theme.resolveAttribute(themeAttribute, color, true)) {
+            return context.getColor(fallbackColor)
         }
 
         return if (color.resourceId == 0) color.data else context.getColor(color.resourceId)

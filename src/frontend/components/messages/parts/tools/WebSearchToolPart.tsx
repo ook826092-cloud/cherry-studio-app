@@ -1,43 +1,37 @@
-import SearchIcon from '@cherrystudio/app-icons/icons/search';
 import { MessagePart } from '@cherrystudio/ui/components';
 import { useTranslation } from 'react-i18next';
 import { Text } from 'react-native';
 
-import { SourceLink } from '../SourceLink';
-import { getToolName, getToolStatusTone, isRecord, type ToolMessagePart } from './toolPartState';
+import type { CherryMessagePart } from '@/shared/data/types/message';
+
+import { enrichWebSources, parseWebSources } from '../webSource';
+import { WebSourceCard } from '../WebSourceCard';
+import { getToolStatusTone, type ToolMessagePart } from './toolPartState';
 
 type WebSearchToolPartProps = {
+  messageParts?: readonly CherryMessagePart[];
   part: ToolMessagePart;
 };
 
-type WebSearchResult = {
-  id: number | string;
-  title: string;
-  url: string;
-};
-
-const WEB_SEARCH_TOOL_NAMES = new Set([
-  'web_search',
-  'builtin_web_search',
-  'builtin_web_search_preview',
-]);
-
-export function WebSearchToolPart({ part }: WebSearchToolPartProps) {
+export function WebSearchToolPart({ messageParts, part }: WebSearchToolPartProps) {
   const { t } = useTranslation();
-  const query = getWebSearchQuery(part.input);
-  const results = part.state === 'output-available' ? parseWebSearchResults(part.output) : [];
+  const rawResults = part.state === 'output-available' ? parseWebSources(part.output) : [];
+  const results = messageParts ? enrichWebSources(rawResults, messageParts) : rawResults;
   const statusText = getWebSearchStatusText(part, results.length, t);
-  const title = query || part.title?.trim() || t('chat.actions.webSearch');
+  const actionTitle = t('chat.builtinTool.web.search');
+  const detailTitle =
+    results.length > 0 ? t('chat.webSearch.detailTitle', { count: results.length }) : actionTitle;
   const isSearching = part.state === 'input-streaming' || part.state === 'input-available';
 
   return (
     <MessagePart.Tool
-      icon={SearchIcon}
+      detailTitle={detailTitle}
+      detailVariant="source-list"
       state={isSearching ? 'running' : 'complete'}
       statusText={statusText}
       statusTone={getToolStatusTone(part)}
       testID="web-search-tool-part"
-      title={title}
+      title={actionTitle}
     >
       {results.length === 0 ? (
         <Text className="text-foreground text-base italic" selectable>
@@ -45,24 +39,11 @@ export function WebSearchToolPart({ part }: WebSearchToolPartProps) {
         </Text>
       ) : (
         results.map((result) => (
-          <SourceLink
-            key={`${result.id}-${result.url}`}
-            label={result.title || result.url}
-            url={result.url}
-            variant="listItem"
-          />
+          <WebSourceCard key={`${result.id}-${result.url}`} source={result} />
         ))
       )}
     </MessagePart.Tool>
   );
-}
-
-export function isWebSearchToolPart(part: ToolMessagePart) {
-  return isWebSearchToolName(getToolName(part));
-}
-
-export function isProviderWebSearchToolPart(part: ToolMessagePart) {
-  return isWebSearchToolPart(part) && getCherryToolType(part) === 'provider';
 }
 
 function getWebSearchStatusText(
@@ -93,42 +74,4 @@ function getWebSearchStatusText(
   }
 
   return t('chat.webSearch.searching');
-}
-
-function parseWebSearchResults(output: unknown): WebSearchResult[] {
-  const rawResults = Array.isArray(output)
-    ? output
-    : isRecord(output) && Array.isArray(output.results)
-      ? output.results
-      : [];
-
-  return rawResults.flatMap((item, index) => {
-    if (!isRecord(item) || typeof item.url !== 'string' || !item.url.trim()) {
-      return [];
-    }
-
-    return [
-      {
-        id: typeof item.id === 'string' || typeof item.id === 'number' ? item.id : index + 1,
-        title: typeof item.title === 'string' ? item.title : item.url,
-        url: item.url,
-      },
-    ];
-  });
-}
-
-function getWebSearchQuery(input: unknown) {
-  if (!isRecord(input) || typeof input.query !== 'string') return '';
-  return input.query.trim();
-}
-
-function isWebSearchToolName(toolName: string) {
-  return WEB_SEARCH_TOOL_NAMES.has(toolName);
-}
-
-function getCherryToolType(part: ToolMessagePart) {
-  const metadata = part.toolMetadata;
-  const cherry = isRecord(metadata?.cherry) ? metadata.cherry : undefined;
-  const tool = isRecord(cherry?.tool) ? cherry.tool : undefined;
-  return typeof tool?.type === 'string' ? tool.type : undefined;
 }

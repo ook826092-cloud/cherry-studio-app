@@ -9,6 +9,7 @@ import { ChatWorkspace } from '../ChatWorkspace';
 const mockLoadOlder = jest.fn(async () => undefined);
 const mockRetry = jest.fn(async () => undefined);
 const mockRespondApproval = jest.fn(async () => undefined);
+const mockForkSession = jest.fn(async () => undefined);
 const mockSetStringAsync = jest.fn(async (_text: string): Promise<void> => undefined);
 const mockAlertShow = jest.fn();
 const mockTranslate = (key: string) => key;
@@ -35,15 +36,17 @@ jest.mock('expo-router/react-navigation', () => ({
 
 jest.mock('@cherrystudio/app-icons/icons/check', () => () => null);
 jest.mock('@cherrystudio/app-icons/icons/copy', () => () => null);
+jest.mock('@cherrystudio/app-icons/icons/ellipsis', () => () => null);
 
 jest.mock('@cherrystudio/ui/components', () => {
   const { createElement } = jest.requireActual('react');
   return {
+    ActionMenu: ({ children }: { children: ReactNode }) => children,
     Button: (props: object) => createElement('Button', props),
     ContentState: {
       Error: (props: object) => createElement('ContentState.Error', props),
     },
-    Menu: ({ children }: { children: ReactNode }) => children,
+    ContextMenu: ({ children }: { children: ReactNode }) => children,
     useAlert: () => ({ alert: { show: mockAlertShow } }),
   };
 });
@@ -58,9 +61,15 @@ jest.mock('@/frontend/components/messages', () => ({
     return createElement('AssistantMessage', { message }, children);
   },
   MessageList: (props: MessageListProps) => {
+    const { createElement, Fragment } = jest.requireActual('react');
     mockMessageListProps = props;
-    const assistant = props.messages.find((message) => message.role === 'assistant');
-    return assistant ? props.renderMessage(assistant) : null;
+    return createElement(
+      Fragment,
+      null,
+      ...props.messages.map((message) =>
+        createElement(Fragment, { key: message.id }, props.renderMessage(message)),
+      ),
+    );
   },
   UserMessage: ({ message }: { message: MessageListItem }) => {
     const { createElement } = jest.requireActual('react');
@@ -79,6 +88,10 @@ jest.mock('@/frontend/utils/constants', () => ({
   isIOS: false,
 }));
 
+jest.mock('@/frontend/hooks/agent', () => ({
+  useAgentSession: () => ({ data: { agentId: 'agent-1', title: 'Session title' } }),
+}));
+
 jest.mock('@/shared/core/logger/LoggerService', () => ({
   loggerService: {
     withContext: () => ({ debug: jest.fn(), error: jest.fn() }),
@@ -90,6 +103,7 @@ jest.mock('../../approval/ToolApprovalSheet', () => ({
 }));
 
 jest.mock('../../runtime', () => ({
+  createAgentMessageListProjectionCache: () => ({}),
   mergeAgentMessageViews: (
     persisted: readonly AgentMessageView[],
     live: readonly AgentMessageView[],
@@ -111,6 +125,7 @@ jest.mock('../../runtime', () => ({
         status: message.status === 'success' ? 'success' : 'pending',
       })),
   useAgentChatActions: () => ({ respondApproval: mockRespondApproval }),
+  useAgentChatFork: () => mockForkSession,
   useAgentChatSession: () => mockAgentChatSession,
 }));
 
@@ -118,6 +133,13 @@ jest.mock('../components/ChatInitialRenderCover', () => ({
   ChatInitialRenderCover: ({ isVisible }: { isVisible: boolean }) => {
     mockCoverVisible = isVisible;
     return null;
+  },
+}));
+
+jest.mock('../components/ChatForkOriginDivider', () => ({
+  ChatForkOriginDivider: ({ sourceSessionId }: { sourceSessionId: string }) => {
+    const { createElement } = jest.requireActual('react');
+    return createElement('ChatForkOriginDivider', { sourceSessionId });
   },
 }));
 
@@ -161,11 +183,14 @@ function renderWorkspace(
   messages: readonly AgentMessageView[],
   sessionId = 'session-1',
   isLoadingInitial = false,
+  fork?: { boundaryMessageId: string; sourceSessionId: string },
 ) {
   let renderer!: ReactTestRenderer;
 
   act(() => {
-    renderer = create(createWorkspaceElement(isPreview, messages, sessionId, isLoadingInitial));
+    renderer = create(
+      createWorkspaceElement(isPreview, messages, sessionId, isLoadingInitial, fork),
+    );
   });
 
   return renderer;
@@ -176,10 +201,13 @@ function createWorkspaceElement(
   messages: readonly AgentMessageView[],
   sessionId = 'session-1',
   isLoadingInitial = false,
+  fork?: { boundaryMessageId: string; sourceSessionId: string },
 ) {
   return (
     <ChatWorkspace
       contentBottomInset={isPreview ? 12 : 96}
+      forkBoundaryMessageId={fork?.boundaryMessageId}
+      forkedFromSessionId={fork?.sourceSessionId}
       isAssistantToolbarEnabled={!isPreview}
       keyboardOffset={isPreview ? 0 : 26}
       messageWindow={{
@@ -189,7 +217,6 @@ function createWorkspaceElement(
         messages,
         retry: mockRetry,
       }}
-      renderGateKey={`${sessionId}:history`}
       sessionId={sessionId}
     />
   );
@@ -248,6 +275,8 @@ describe('ChatWorkspace message rendering integration', () => {
     ]);
     expect(mockMessageListProps?.enteringMessageId).toBe('user-pending');
     expect(mockMessageListProps?.contentBottomInset).toBe(96);
+    expect(mockMessageListProps?.dataKey).toBe('session-1');
+    expect(mockMessageListProps?.initialLayoutReady).toBe(true);
     expect(mockMessageListProps?.keyboardOffset).toBe(26);
     expect(mockMessageListProps?.onLoadOlder).toBe(mockLoadOlder);
     expect(mockIsLoadingOlder).toBe(true);
@@ -264,6 +293,55 @@ describe('ChatWorkspace message rendering integration', () => {
     expect(
       assistantMessage.findAllByProps({ testID: 'assistant-message-toolbar' }).length,
     ).toBeGreaterThan(0);
+  });
+
+  test('renders a fork origin after the persisted copied-history boundary', () => {
+    const messages = [
+      createMessage('copied-user', 'user'),
+      createMessage('copied-assistant', 'assistant'),
+      createMessage('branch-user', 'user'),
+    ];
+
+    renderer = renderWorkspace(false, messages, 'session-1', false, {
+      boundaryMessageId: 'copied-assistant',
+      sourceSessionId: 'source-session',
+    });
+
+    expect(mockMessageListProps?.messages.map((message) => message.id)).toEqual([
+      'copied-user',
+      'copied-assistant',
+      'fork-origin:session-1',
+      'branch-user',
+    ]);
+    expect(renderer.root.findByType('ChatForkOriginDivider').props.sourceSessionId).toBe(
+      'source-session',
+    );
+  });
+
+  test('does not render a fork origin before pagination loads its boundary', () => {
+    renderer = renderWorkspace(false, [createMessage('branch-user', 'user')], 'session-1', false, {
+      boundaryMessageId: 'copied-assistant',
+      sourceSessionId: 'source-session',
+    });
+
+    expect(mockMessageListProps?.messages.map((message) => message.id)).toEqual(['branch-user']);
+    expect(renderer.root.findAllByType('ChatForkOriginDivider')).toHaveLength(0);
+  });
+
+  test('does not reuse a child key across Session-scoped surfaces', () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      renderer = renderWorkspace(false, [createMessage('assistant-1', 'assistant')]);
+
+      expect(
+        consoleError.mock.calls.some(([message]) =>
+          String(message).includes('Encountered two children with the same key'),
+        ),
+      ).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   test('does not show copy failure feedback from the previous Session', async () => {

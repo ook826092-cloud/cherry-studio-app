@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, Text, View } from 'react-native';
 
-const TOOL_APPROVAL_SHEET_HEIGHT = 420;
 const ignoreClose = () => undefined;
 
 export type PendingToolApproval = {
@@ -43,12 +42,13 @@ export function ToolApprovalSheet({ approvals, isOpen, onRespond }: ToolApproval
   return (
     <BottomSheet
       dismissible={false}
-      height={TOOL_APPROVAL_SHEET_HEIGHT}
       onClose={ignoreClose}
       open={isOpen}
+      sizes={['compact', 'large']}
       title={t('chat.tool.approval.title')}
     >
       <ToolApprovalSheetBody
+        key={approval.approvalId}
         approval={approval}
         onRespond={onRespond}
         pendingCount={approvals.length}

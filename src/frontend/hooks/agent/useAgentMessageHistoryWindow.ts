@@ -20,6 +20,11 @@ type OlderFetchOptions = {
   showLoading: boolean;
 };
 
+type ActiveOlderFetch = {
+  promise: Promise<void>;
+  sessionId: string | undefined;
+};
+
 function flattenMessagePages(
   pages: readonly CursorPaginationResponse<AgentMessageView>[],
 ): AgentMessageView[] {
@@ -49,16 +54,19 @@ export function useAgentMessageHistoryWindow(
   const allMessages = useMemo(() => flattenMessagePages(pages), [pages]);
   const { hasHiddenMessages, hiddenMessageCount, revealMore, visibleMessages } =
     useMessageRenderWindow(allMessages);
-  const activeOlderFetchRef = useRef<Promise<void> | null>(null);
-  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const activeOlderFetchRef = useRef<ActiveOlderFetch | null>(null);
+  const [loadingOlderSessionId, setLoadingOlderSessionId] = useState<string>();
 
   const fetchOlderIfNeeded = useCallback(
     async (fetchOptions: OlderFetchOptions) => {
       const activeFetch = activeOlderFetchRef.current;
-      if (activeFetch) {
+      if (activeFetch && activeFetch.sessionId === sessionId) {
         if (fetchOptions.showLoading) {
-          setIsLoadingOlder(true);
-          await activeFetch.finally(() => setIsLoadingOlder(false));
+          const activePromise = activeFetch.promise;
+          setLoadingOlderSessionId(sessionId);
+          await activePromise.finally(() => {
+            setLoadingOlderSessionId((current) => (current === sessionId ? undefined : current));
+          });
         }
         return;
       }
@@ -68,21 +76,21 @@ export function useAgentMessageHistoryWindow(
       }
 
       const fetchPromise = loadNext();
-      activeOlderFetchRef.current = fetchPromise;
+      activeOlderFetchRef.current = { promise: fetchPromise, sessionId };
       if (fetchOptions.showLoading) {
-        setIsLoadingOlder(true);
+        setLoadingOlderSessionId(sessionId);
       }
 
       await fetchPromise.finally(() => {
-        if (activeOlderFetchRef.current === fetchPromise) {
+        if (activeOlderFetchRef.current?.promise === fetchPromise) {
           activeOlderFetchRef.current = null;
         }
         if (fetchOptions.showLoading) {
-          setIsLoadingOlder(false);
+          setLoadingOlderSessionId((current) => (current === sessionId ? undefined : current));
         }
       });
     },
-    [hasNext, isLoadingMore, loadNext],
+    [hasNext, isLoadingMore, loadNext, sessionId],
   );
 
   const loadOlder = useCallback(async () => {
@@ -100,7 +108,7 @@ export function useAgentMessageHistoryWindow(
   return {
     error,
     isLoadingInitial: isLoading,
-    isLoadingOlder,
+    isLoadingOlder: loadingOlderSessionId === sessionId,
     loadOlder,
     messages: visibleMessages,
     retry,

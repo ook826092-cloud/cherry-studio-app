@@ -12,14 +12,11 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 
+import { chatHref, chatRouteParams } from '@/frontend/components/navigation/chat';
 import { queryKeys, useBackendModule } from '@/frontend/data';
 import type { AgentInputPart, AgentSubmitMessageInput } from '@/shared/contracts/agent';
-import { loggerService } from '@/shared/core/logger/LoggerService';
 
-import { persistSessionWebSearchSelection } from '../sessionWebSearchSelection';
 import { AgentSessionChatClient, type AgentSessionChatState } from './AgentSessionChatClient';
-
-const logger = loggerService.withContext('ChatProvider');
 
 type AgentChatSendInput = {
   agentId?: string;
@@ -27,11 +24,18 @@ type AgentChatSendInput = {
   parts: AgentInputPart[];
   reasoningEffort?: AgentSubmitMessageInput['reasoningEffort'];
   sessionId?: string;
-  temporaryCapabilities?: AgentSubmitMessageInput['temporaryCapabilities'];
+};
+
+type AgentChatForkInput = {
+  fromMessageId: string;
+  sessionId: string;
+  /** Localized name for the copy; omitted, the fork inherits the source's. */
+  title?: string;
 };
 
 type AgentChatContextValue = {
   client: AgentSessionChatClient;
+  forkSession: (input: AgentChatForkInput) => Promise<void>;
   sendMessage: (input: AgentChatSendInput) => Promise<void>;
 };
 
@@ -85,14 +89,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   useEffect(() => () => client.dispose(), [client]);
 
   const sendMessage = useCallback(
-    async ({
-      agentId,
-      modelId,
-      parts,
-      reasoningEffort,
-      sessionId,
-      temporaryCapabilities,
-    }: AgentChatSendInput) => {
+    async ({ agentId, modelId, parts, reasoningEffort, sessionId }: AgentChatSendInput) => {
       let targetSessionId = sessionId;
       if (!targetSessionId) {
         if (!agentId) {
@@ -102,20 +99,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
         const session = await client.startSession(agentId, parts, {
           ...(modelId !== undefined ? { modelId } : {}),
           ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-          ...(temporaryCapabilities !== undefined ? { temporaryCapabilities } : {}),
         });
         targetSessionId = session.id;
-        try {
-          persistSessionWebSearchSelection(
-            targetSessionId,
-            temporaryCapabilities?.includes('web-search') ?? false,
-          );
-        } catch (error) {
-          logger.warn('Failed to persist Session web-search selection', error as Error, {
-            sessionId: targetSessionId,
-          });
-        }
-        navigation.openSession(targetSessionId, agentId);
+        navigation.openSession(targetSessionId);
         void queryClient.invalidateQueries({ queryKey: queryKeys.agentSessions.all() });
         return;
       }
@@ -123,12 +109,22 @@ export function ChatProvider({ children }: PropsWithChildren) {
       await client.submitMessage(targetSessionId, parts, {
         ...(modelId !== undefined ? { modelId } : {}),
         ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-        ...(temporaryCapabilities !== undefined ? { temporaryCapabilities } : {}),
       });
     },
     [client, navigation, queryClient],
   );
-  const value = useMemo(() => ({ client, sendMessage }), [client, sendMessage]);
+  const forkSession = useCallback(
+    async ({ fromMessageId, sessionId, title }: AgentChatForkInput) => {
+      const session = await client.forkSession(sessionId, fromMessageId, title);
+      navigation.openSession(session.id);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentSessions.all() });
+    },
+    [client, navigation, queryClient],
+  );
+  const value = useMemo(
+    () => ({ client, forkSession, sendMessage }),
+    [client, forkSession, sendMessage],
+  );
 
   return <AgentChatContext value={value}>{children}</AgentChatContext>;
 }
@@ -137,17 +133,14 @@ function createChatNavigation(input: { pathname: string; router: ReturnType<type
   let navigation = input;
 
   return {
-    openSession: (sessionId: string, agentId: string) => {
-      const params = {
-        agentId,
-        sessionId,
-      };
+    openSession: (sessionId: string) => {
+      const target = { kind: 'session' as const, sessionId };
       if (navigation.pathname === '/') {
-        navigation.router.setParams(params);
+        navigation.router.setParams(chatRouteParams(target));
         return;
       }
 
-      navigation.router.replace({ params, pathname: '/' });
+      navigation.router.replace(chatHref(target));
     },
     update: (nextNavigation: typeof input) => {
       navigation = nextNavigation;
@@ -198,6 +191,11 @@ export function useAgentChatControls(input: { agentId?: string; sessionId?: stri
 
 export function useAgentChatActions() {
   return useAgentChatContext().client;
+}
+
+/** Forks a Session at one message and navigates to the copy. */
+export function useAgentChatFork() {
+  return useAgentChatContext().forkSession;
 }
 
 function useAgentSessionSelection<TValue>(

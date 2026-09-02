@@ -1,10 +1,15 @@
-import ChevronDownIcon from '@cherrystudio/app-icons/icons/chevron-down';
-import { BottomSheet, ContentState, Input, Section, useAlert } from '@cherrystudio/ui/components';
+import {
+  ContentState,
+  Input,
+  OptionPickerBottomSheet,
+  SelectField,
+  useAlert,
+} from '@cherrystudio/ui/components';
 import { loggerService } from '@logger';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Keyboard, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Keyboard, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -25,12 +30,14 @@ import {
 } from '@/frontend/hooks/agent';
 import { useMcpServersApi } from '@/frontend/hooks/mcp/useMcpServers';
 import { keyboardBottomOffset } from '@/frontend/utils/constants';
+import { getSingleRouteParam } from '@/frontend/utils/routeParams';
 import type { WriteAgentToolBinding } from '@/shared/data/api/schemas/agentToolBindings';
 import type { Agent } from '@/shared/data/types/agent';
 import type { AgentToolBinding } from '@/shared/data/types/agentToolBinding';
 import type { McpServer } from '@/shared/data/types/mcpServer';
 import type { UniqueModelId } from '@/shared/data/types/model';
 
+import { AgentCapabilitiesSection } from './AgentCapabilitiesSection';
 import { type AgentFormState, buildAgentDto, createAgentFormState } from './agentForm';
 import { createAgentToolBindingDraft } from './agentToolSettings';
 import { AgentToolsSection } from './AgentToolsSection';
@@ -42,7 +49,7 @@ const logger = loggerService.withContext('AgentEditScreen');
 export default function AgentEditScreen() {
   const { t } = useTranslation();
   const params = useLocalSearchParams<{ agentId?: string | string[] }>();
-  const agentId = getSingleParamValue(params.agentId);
+  const agentId = getSingleRouteParam(params.agentId);
   const { agent, isLoading, refetch } = useAgentApiById(agentId);
   const {
     bindings,
@@ -92,6 +99,7 @@ export default function AgentEditScreen() {
 
   return (
     <AgentEditForm
+      key={agentId ?? 'new'}
       agent={agent}
       agentId={agentId}
       originalToolBindings={bindings}
@@ -175,7 +183,6 @@ function AgentEditForm({
   const closeToolApprovalModePicker = useCallback(() => setIsToolApprovalModePickerOpen(false), []);
   const handleToolApprovalModeSelect = useCallback(
     (mode: AgentFormState['toolApprovalMode']) => {
-      closeToolApprovalModePicker();
       if (mode === form.toolApprovalMode) {
         return;
       }
@@ -192,7 +199,7 @@ function AgentEditForm({
 
       updateForm('toolApprovalMode', mode);
     },
-    [alert, closeToolApprovalModePicker, form.toolApprovalMode, t, updateForm],
+    [alert, form.toolApprovalMode, t, updateForm],
   );
   const reportAvatarPickError = useCallback(
     (error: unknown) => {
@@ -329,16 +336,9 @@ function AgentEditForm({
             placeholder={t('agent.form.instructionsPlaceholder')}
             value={form.instructions}
           />
-          <Pressable
-            accessibilityLabel={t('agent.form.modelSelect')}
-            accessibilityRole="button"
-            className="min-h-10 flex-row items-center gap-2 rounded-lg border border-border bg-field px-3 py-2 active:opacity-60"
-            onPress={openModelSelect}
-          >
-            <Text className="shrink-0 text-base text-foreground">
-              {t('agent.form.modelSelect')}
-            </Text>
-            <View className="min-w-0 flex-1 flex-row items-center justify-end gap-1">
+          <SelectField accessibilityLabel={t('agent.form.modelSelect')} onPress={openModelSelect}>
+            <SelectField.Label>{t('agent.form.modelSelect')}</SelectField.Label>
+            <SelectField.Value>
               {selectedModel ? (
                 <ModelPickerIcon
                   model={selectedModel.model}
@@ -347,55 +347,42 @@ function AgentEditForm({
                   size={20}
                 />
               ) : null}
-              <Text
-                className="min-w-0 shrink text-right text-base text-foreground"
-                numberOfLines={1}
-              >
+              <SelectField.ValueText>
                 {selectedModel?.model.name ?? t('agent.model.none')}
-              </Text>
-              <ChevronDownIcon className="size-5 shrink-0 text-muted-foreground" />
-            </View>
-          </Pressable>
+              </SelectField.ValueText>
+            </SelectField.Value>
+          </SelectField>
           <View className="gap-1">
-            <Pressable
+            <SelectField
               accessibilityHint={t(`agent.toolApproval.mode.${form.toolApprovalMode}.description`)}
               accessibilityLabel={t('agent.toolApproval.title')}
-              accessibilityRole="button"
-              className="min-h-10 flex-row items-center gap-2 rounded-lg border border-border bg-field px-3 py-2 active:opacity-60"
               onPress={openToolApprovalModePicker}
             >
-              <Text className="shrink-0 text-base text-foreground">
-                {t('agent.toolApproval.title')}
-              </Text>
-              <View className="min-w-0 flex-1 flex-row items-center justify-end gap-1">
-                <Text
-                  className="min-w-0 shrink text-right text-base text-foreground"
-                  numberOfLines={1}
-                >
+              <SelectField.Label>{t('agent.toolApproval.title')}</SelectField.Label>
+              <SelectField.Value>
+                <SelectField.ValueText>
                   {t(`agent.toolApproval.mode.${form.toolApprovalMode}.label`)}
-                </Text>
-                <ChevronDownIcon className="size-5 shrink-0 text-muted-foreground" />
-              </View>
-            </Pressable>
+                </SelectField.ValueText>
+              </SelectField.Value>
+            </SelectField>
             <Text className="px-1 text-muted-foreground text-sm" selectable>
               {t(`agent.toolApproval.mode.${form.toolApprovalMode}.description`)}
             </Text>
           </View>
         </View>
-        {/* MCP remains the only Agent-specific tool source. The approval setting
-            above changes interaction policy, not which tools are available. */}
-        {isEditing ? (
-          <View className="gap-2">
-            <Text className="px-1 font-medium text-foreground text-sm">
-              {t('agent.tools.section')}
-            </Text>
-            <AgentToolsSection
-              bindings={toolBindings}
-              onChange={setToolBindings}
-              originalBindings={originalToolBindings}
-              servers={servers}
-            />
-          </View>
+        {/* Capability groups gate which built-in tools a turn may offer; the
+            approval setting above changes interaction policy only. */}
+        <AgentCapabilitiesSection
+          disabledCapabilities={form.disabledCapabilities}
+          onChange={(next) => updateForm('disabledCapabilities', next)}
+        />
+        {isEditing && (servers.length > 0 || toolBindings.length > 0) ? (
+          <AgentToolsSection
+            bindings={toolBindings}
+            onChange={setToolBindings}
+            originalBindings={originalToolBindings}
+            servers={servers}
+          />
         ) : null}
       </KeyboardAwareScrollView>
       {isModelPickerOpen ? (
@@ -408,35 +395,29 @@ function AgentEditForm({
           title={t('agent.form.modelSelect')}
         />
       ) : null}
-      <BottomSheet
+      <OptionPickerBottomSheet
+        helperText={t('agent.toolApproval.footer')}
         onClose={closeToolApprovalModePicker}
+        onValueChange={handleToolApprovalModeSelect}
         open={isToolApprovalModePickerOpen}
+        options={[
+          {
+            description: t('agent.toolApproval.mode.default.description'),
+            label: t('agent.toolApproval.mode.default.label'),
+            value: 'default',
+          },
+          {
+            description: t('agent.toolApproval.mode.auto.description'),
+            label: t('agent.toolApproval.mode.auto.label'),
+            value: 'auto',
+          },
+        ]}
+        selectedValue={form.toolApprovalMode}
         size="compact"
         title={t('agent.toolApproval.title')}
-      >
-        <ScrollView contentContainerClassName="px-6 pt-2" showsVerticalScrollIndicator={false}>
-          <Section footer={t('agent.toolApproval.footer')}>
-            <Section.RadioItem
-              description={t('agent.toolApproval.mode.default.description')}
-              label={t('agent.toolApproval.mode.default.label')}
-              onPress={() => handleToolApprovalModeSelect('default')}
-              selected={form.toolApprovalMode === 'default'}
-            />
-            <Section.RadioItem
-              description={t('agent.toolApproval.mode.auto.description')}
-              label={t('agent.toolApproval.mode.auto.label')}
-              onPress={() => handleToolApprovalModeSelect('auto')}
-              selected={form.toolApprovalMode === 'auto'}
-            />
-          </Section>
-        </ScrollView>
-      </BottomSheet>
+      />
     </>
   );
-}
-
-function getSingleParamValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value.at(0) : value;
 }
 
 const styles = StyleSheet.create({

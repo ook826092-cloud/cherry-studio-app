@@ -73,6 +73,7 @@
   --color-inline-code: var(--inline-code);
   --color-inline-code-foreground: var(--inline-code-foreground);
   --color-chat-user: var(--chat-user);
+  --color-chat-background: var(--chat-background);
   --color-tag-amber: var(--tag-amber);
   --color-tag-amber-foreground: var(--tag-amber-foreground);
   --color-tag-blue: var(--tag-blue);
@@ -84,8 +85,6 @@
   --color-constant-black: var(--constant-black);
   --color-constant-white: var(--constant-white);
   --color-scrim: var(--scrim);
-  --color-grouped-background: var(--grouped-background);
-  --color-grouped-surface: var(--grouped-surface);
   --color-usage-level-1: var(--usage-level-1);
   --color-usage-level-2: var(--usage-level-2);
   --color-usage-level-3: var(--usage-level-3);
@@ -145,9 +144,9 @@
       --red-700: oklch(0.6256 0.2524 23.03);
       --red-900: oklch(0.5499 0.232 25.29);
       --red-1000: oklch(0.248 0.1041 18.86);
-      --background: var(--background-100);
+      --background: #f5f5f5;
       --foreground: var(--gray-1000);
-      --card: var(--gray-100);
+      --card: var(--background-100);
       --card-foreground: var(--gray-1000);
       --popover: var(--background-100);
       --popover-foreground: var(--gray-1000);
@@ -202,13 +201,12 @@
       --error-subtle: var(--red-100);
       --error-subtle-foreground: var(--red-1000);
       --error-border: var(--red-400);
-      --grouped-background: var(--gray-100);
-      --grouped-surface: var(--background-100);
       --code-block: var(--gray-100);
       --inline-code: var(--gray-alpha-100);
       --inline-code-foreground: var(--red-900);
       --brand: #ff5757;
       --chat-user: var(--gray-alpha-100);
+      --chat-background: #f9f9f9;
       --tag-amber: var(--amber-100);
       --tag-amber-foreground: var(--amber-900);
       --tag-blue: var(--blue-100);
@@ -326,13 +324,12 @@
       --error-subtle: var(--red-100);
       --error-subtle-foreground: var(--red-1000);
       --error-border: var(--red-400);
-      --grouped-background: var(--background-100);
-      --grouped-surface: var(--gray-100);
       --code-block: var(--gray-100);
       --inline-code: var(--gray-alpha-100);
       --inline-code-foreground: var(--red-900);
       --brand: #ff5757;
       --chat-user: var(--gray-alpha-100);
+      --chat-background: var(--background);
       --tag-amber: var(--amber-100);
       --tag-amber-foreground: var(--amber-900);
       --tag-blue: var(--blue-100);

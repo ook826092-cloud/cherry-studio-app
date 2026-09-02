@@ -200,10 +200,7 @@ export class AgentSessionChatClient {
   async startSession(
     agentId: string,
     parts: AgentInputPart[],
-    overrides: Pick<
-      AgentStartSessionInput,
-      'modelId' | 'reasoningEffort' | 'temporaryCapabilities'
-    > = {},
+    overrides: Pick<AgentStartSessionInput, 'modelId' | 'reasoningEffort'> = {},
   ): Promise<AgentSessionView> {
     const session = await this.protocol.startSession({
       agentId,
@@ -217,13 +214,26 @@ export class AgentSessionChatClient {
     return session;
   }
 
+  async forkSession(
+    sessionId: string,
+    fromMessageId: string,
+    title?: string,
+  ): Promise<AgentSessionView> {
+    const session = await this.protocol.forkSession({
+      fromMessageId,
+      sessionId,
+      ...(title ? { title } : {}),
+    });
+    // The fork is durable even if observation needs a retry; the caller
+    // navigates to it either way, and the transcript is a data read.
+    await this.observe(session.id).catch(() => undefined);
+    return session;
+  }
+
   async submitMessage(
     sessionId: string,
     parts: AgentInputPart[],
-    overrides: Pick<
-      AgentSubmitMessageInput,
-      'modelId' | 'reasoningEffort' | 'temporaryCapabilities'
-    > = {},
+    overrides: Pick<AgentSubmitMessageInput, 'modelId' | 'reasoningEffort'> = {},
   ) {
     await this.observe(sessionId);
     return this.protocol.submitMessage({ parts, sessionId, ...overrides });
@@ -346,6 +356,9 @@ export class AgentSessionChatClient {
           ...(event.message.role === 'user' ? { enteringUserMessageId: event.message.id } : {}),
           liveMessages: [...entry.liveMessages.values()],
         });
+        if (event.message.role === 'user') {
+          this.options.onSessionChanged?.(entry.state.sessionId);
+        }
         this.options.onTranscriptChanged?.(entry.state.sessionId);
         return;
       case 'message.delta': {

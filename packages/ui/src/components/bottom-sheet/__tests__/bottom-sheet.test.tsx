@@ -21,6 +21,7 @@ jest.mock('@swmansion/react-native-bottom-sheet', () => {
       mockBottomSheetProps = props;
       return <View>{props.children}</View>;
     },
+    programmatic: (value: number) => ({ programmatic: true, value }),
   };
 });
 
@@ -104,7 +105,7 @@ describe('BottomSheet', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  test('keeps a non-dismissible sheet open', () => {
+  test('keeps the closed detent of a non-dismissible sheet programmatic-only', () => {
     const onClose = jest.fn();
 
     act(() => {
@@ -120,10 +121,50 @@ describe('BottomSheet', () => {
         </BottomSheet>,
       );
     });
-    act(() => (mockBottomSheetProps.onIndexChange as (index: number) => void)(0));
-    act(() => (mockBottomSheetProps.onSettle as (index: number) => void)(0));
+    expect((mockBottomSheetProps.detents as unknown[])[0]).toEqual({
+      programmatic: true,
+      value: 0,
+    });
+
+    act(() => {
+      expect(mockHardwareBackPress?.()).toBe(true);
+    });
 
     expect(mockBottomSheetProps.index).toBe(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test('allows a controlled close for a non-dismissible sheet', () => {
+    const onClose = jest.fn();
+
+    act(() => {
+      renderer = create(
+        <BottomSheet
+          dismissible={false}
+          onClose={onClose}
+          open
+          size="medium"
+          title="Approval required"
+        >
+          <Text>Content</Text>
+        </BottomSheet>,
+      );
+    });
+    act(() => {
+      renderer?.update(
+        <BottomSheet
+          dismissible={false}
+          onClose={onClose}
+          open={false}
+          size="medium"
+          title="Approval required"
+        >
+          <Text>Content</Text>
+        </BottomSheet>,
+      );
+    });
+
+    expect(mockBottomSheetProps.index).toBe(0);
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -146,6 +187,33 @@ describe('BottomSheet', () => {
 
     act(() => renderer?.root.findByProps({ accessibilityLabel: 'Back' }).props.onPress());
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  test('keeps the optional footer outside the flexible body with its own safe-area inset', () => {
+    act(() => {
+      renderer = create(
+        <BottomSheet
+          footer={<Text testID="footer-action">Create</Text>}
+          onClose={jest.fn()}
+          open
+          size="medium"
+          title="Agents"
+        >
+          <Text testID="sheet-content">Content</Text>
+        </BottomSheet>,
+      );
+    });
+
+    const footer = renderer?.root.find(
+      (node) =>
+        typeof node.props.className === 'string' &&
+        node.props.className.includes('border-t border-border') &&
+        node.findAllByProps({ testID: 'footer-action' }).length > 0,
+    );
+
+    expect(footer?.props.className).toContain('px-4');
+    expect(StyleSheet.flatten(footer?.props.style)).toEqual({ paddingBottom: 34 });
+    expect(footer?.findAllByProps({ testID: 'sheet-content' })).toHaveLength(0);
   });
 
   test('routes Android hardware back through the optional second-level action', () => {

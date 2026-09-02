@@ -1,17 +1,20 @@
+import { Button } from '@cherrystudio/ui/components';
 import { LegendList, type LegendListRenderItemProps } from '@legendapp/list/react-native';
 import { Redirect, useLocalSearchParams } from 'expo-router';
 import { memo, useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { ModelSearchControls } from '@/frontend/components/modelPicker';
+import { useListBottomInset } from '@/frontend/components/selection';
 import type { Model, UniqueModelId } from '@/shared/data/types/model';
 import type { Provider } from '@/shared/data/types/provider';
 
+import { ProviderModelPullChrome } from './models/components/ProviderModelPullChrome';
 import { ProviderModelPurposeTabs } from './models/components/ProviderModelPurposeTabs';
 import {
   ProviderModelRow,
-  providerModelRowEstimatedHeight,
+  providerModelRowEstimatedHeights,
 } from './models/components/ProviderModelRow';
 import {
   buildProviderModelPullListItems,
@@ -65,6 +68,7 @@ export default function ProviderModelPullScreen() {
 
 export function ProviderModelPullPreviewContent({
   isApplying,
+  onApply,
   preview,
   provider,
   selectedIds,
@@ -72,6 +76,7 @@ export function ProviderModelPullPreviewContent({
   toggleModel,
 }: {
   isApplying: boolean;
+  onApply: () => void;
   preview: ProviderModelPullPreview;
   provider: Provider | undefined;
   selectedIds: ReadonlySet<UniqueModelId>;
@@ -80,6 +85,7 @@ export function ProviderModelPullPreviewContent({
 }) {
   const { t } = useTranslation();
   const [searchText, setSearchText] = useState('');
+  const listBottomInset = useListBottomInset();
   const deferredSearchText = useDeferredValue(searchText);
   const [modelPurpose, setModelPurpose] = useState<ProviderModelPurpose>('all');
   const missingCount = preview.missing.length;
@@ -138,46 +144,54 @@ export function ProviderModelPullPreviewContent({
     }),
     [isApplying, provider, sectionIds, sectionSelectedAll, selectedIds, toggleAll, toggleModel],
   );
+  const listContentStyle = useMemo(() => ({ paddingBottom: listBottomInset }), [listBottomInset]);
   const isSearchEmpty = displayedPreview.added.length + displayedPreview.missing.length === 0;
   return (
-    <LegendList
-      alwaysBounceVertical={false}
-      contentContainerStyle={styles.listContent}
-      contentInsetAdjustmentBehavior="automatic"
-      data={listItems}
-      drawDistance={320}
-      estimatedItemSize={providerModelRowEstimatedHeight}
-      extraData={listExtraData}
-      getItemType={getPullListItemType}
-      keyboardDismissMode="on-drag"
-      keyboardShouldPersistTaps="handled"
-      keyExtractor={pullListKeyExtractor}
-      ListFooterComponent={
-        isSearchEmpty ? (
-          <View className="items-center justify-center px-4 py-10">
-            <Text className="text-center text-base text-foreground">
-              {t('settings.provider.models.search.empty')}
-            </Text>
-          </View>
-        ) : null
-      }
-      ListHeaderComponent={
-        <ModelSearchControls
-          placeholder={t('modelPicker.searchPlaceholder')}
-          searchText={searchText}
-          setSearchText={setSearchText}
-        >
-          {showsModelPurposeTabs ? (
-            <ProviderModelPurposeTabs onChange={setModelPurpose} value={effectiveModelPurpose} />
-          ) : null}
-        </ModelSearchControls>
-      }
-      maintainVisibleContentPosition={false}
-      recycleItems
-      renderItem={renderPullListItem}
-      showsVerticalScrollIndicator={false}
-      style={styles.list}
-    />
+    <>
+      <LegendList
+        alwaysBounceVertical={false}
+        contentContainerStyle={listContentStyle}
+        contentInsetAdjustmentBehavior="automatic"
+        data={listItems}
+        drawDistance={320}
+        estimatedItemSize={providerModelRowEstimatedHeights.synchronization}
+        extraData={listExtraData}
+        getItemType={getPullListItemType}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        keyExtractor={pullListKeyExtractor}
+        ListFooterComponent={
+          isSearchEmpty ? (
+            <View className="items-center justify-center px-4 py-10">
+              <Text className="text-center text-base text-foreground">
+                {t('settings.provider.models.search.empty')}
+              </Text>
+            </View>
+          ) : null
+        }
+        ListHeaderComponent={
+          <ModelSearchControls
+            placeholder={t('modelPicker.searchPlaceholder')}
+            searchText={searchText}
+            setSearchText={setSearchText}
+          >
+            {showsModelPurposeTabs ? (
+              <ProviderModelPurposeTabs onChange={setModelPurpose} value={effectiveModelPurpose} />
+            ) : null}
+          </ModelSearchControls>
+        }
+        maintainVisibleContentPosition={false}
+        recycleItems
+        renderItem={renderPullListItem}
+        showsVerticalScrollIndicator={false}
+        style={styles.list}
+      />
+      <ProviderModelPullChrome
+        isApplying={isApplying}
+        selectedCount={selectedIds.size}
+        onApply={onApply}
+      />
+    </>
   );
 }
 
@@ -233,7 +247,8 @@ function isEverySelected(
  * alone unless that tick was the one that completed or broke a section.
  *
  * The two sections pull in opposite directions — one adds models, the other
- * drops them — so each keeps its own select-all beside the toolbar's.
+ * drops them — so each owns its own select-all while the toolbar reports only
+ * the total selection and commit action.
  */
 const PullSectionHeader = memo(function PullSectionHeader({
   ids,
@@ -275,16 +290,16 @@ const PullSectionHeader = memo(function PullSectionHeader({
         {ids.length}
       </Text>
       <View className="flex-1" />
-      <Pressable
+      <Button
         accessibilityLabel={actionLabel}
-        accessibilityRole="button"
-        className="shrink-0 justify-center px-1 active:opacity-60 disabled:opacity-40"
+        className="shrink-0"
         disabled={ids.length === 0}
-        hitSlop={6}
+        size="xs"
+        variant="ghost"
         onPress={handleActionPress}
       >
-        <Text className="font-medium text-foreground text-sm">{actionLabel}</Text>
-      </Pressable>
+        <Button.Label>{actionLabel}</Button.Label>
+      </Button>
     </View>
   );
 });
@@ -315,6 +330,7 @@ const PullModelRow = memo(function PullModelRow({
       selection={{ isDisabled: isApplying, isSelected, onToggle: handleToggle }}
       // The provider no longer serves it, whether or not the row is ticked.
       tone={section === 'missing' ? 'struck' : 'default'}
+      variant="synchronization"
     />
   );
 });
@@ -325,10 +341,5 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
-  },
-  // No horizontal padding: the model rows carry their own `px-4`, so an outer
-  // inset would push their content twice as far in as the navigation chrome.
-  listContent: {
-    paddingBottom: 24,
   },
 });

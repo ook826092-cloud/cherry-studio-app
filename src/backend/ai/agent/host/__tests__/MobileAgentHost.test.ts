@@ -61,6 +61,7 @@ const agents: AgentDefinitionSource = {
       model: { providerId: 'mock-provider', modelId: 'mock-model' },
       options: { maxOutputTokens: 512, reasoningEffort: 'low', temperature: 0.2 },
       toolApprovalMode: 'default',
+      disabledCapabilities: ['health'],
     };
   },
 };
@@ -129,6 +130,7 @@ const stubTool: RuntimeTool = {
 
 type HostOverrides = {
   agents?: AgentDefinitionSource;
+  appLanguage?: () => 'en-US' | 'zh-CN';
   resolveRuntimeTools?: () => Promise<RuntimeTool[]>;
 };
 
@@ -150,6 +152,7 @@ function createHost(
     runtime,
     {
       agents: overrides.agents ?? agents,
+      appLanguage: overrides.appLanguage ?? (() => 'zh-CN'),
       files,
       inferenceModel: resolveInferenceModel,
       naming,
@@ -265,7 +268,13 @@ describe('MobileAgentHost', () => {
       'the initial turn to settle',
     );
 
-    expect(await store.getSession(session.id)).toEqual(session);
+    // Settling the turn stamps conversation activity on the Session row, so
+    // the update timestamp is the one field allowed to move past the snapshot
+    // `startSession` returned.
+    expect(await store.getSession(session.id)).toEqual({
+      ...session,
+      updatedAt: expect.any(String),
+    });
     expect((await store.listMessages(session.id)).map((message) => message.role)).toEqual([
       'user',
       'assistant',
@@ -442,13 +451,18 @@ describe('MobileAgentHost', () => {
 
     // The Runtime saw the current Agent definition and the turn input.
     expect(requests[0]).toMatchObject({
-      instructions: 'Be brief.',
+      instructions: expect.stringContaining(
+        '<agent_instructions>\nBe brief.\n</agent_instructions>',
+      ),
       history: [],
       contextCheckpoint: null,
       input: [{ type: 'text', text: 'Hello.' }],
       model: { providerId: 'mock-provider', modelId: 'mock-model' },
       options: { maxOutputTokens: 512, reasoningEffort: 'low', temperature: 0.2 },
     });
+    expect(requests[0]?.instructions).toContain(
+      'The current Cherry Studio App language is `zh-CN`.',
+    );
 
     // A second turn feeds the stored transcript back as history.
     const secondEvents: AgentEvent[] = [];
@@ -645,14 +659,13 @@ describe('MobileAgentHost', () => {
     await host.submitMessage({
       sessionId: session.id,
       parts: [{ type: 'text', text: 'Save it.' }],
-      temporaryCapabilities: ['web-search'],
     });
     await waitFor(() => terminalTurnEvent(events) !== undefined, 'the turn to settle');
 
     expect(getTools).toHaveBeenCalledWith({
+      disabledCapabilities: ['health'],
       model: { providerId: 'mock-provider', modelId: 'mock-model' },
       resources: expect.objectContaining({ fileEntryIds: expect.any(Set) }),
-      temporaryCapabilities: new Set(['web-search']),
     });
     expect([...getTools.mock.calls[0]![0].resources.fileEntryIds]).toEqual([]);
     expect(requests[0]?.tools).toEqual([stubTool]);
@@ -2091,6 +2104,56 @@ describe('MobileAgentHost', () => {
       }),
     ).rejects.toMatchObject({ view: { code: 'ATTACHMENT_UNAVAILABLE' } });
     expect(await store.listMessages(unavailableSession.id)).toEqual([]);
+  });
+
+  test('forks a settled transcript and refuses to fork across a live turn', async () => {
+    const released = createDeferred();
+    const runtime = new FakeRuntime({ descriptor: FAKE_DESCRIPTOR }).script(async (controller) => {
+      controller.emit({
+        type: 'part.add',
+        index: 0,
+        part: { id: 'text-1', type: 'text', text: 'Answer', state: 'done' },
+      });
+      await released.promise;
+    });
+    const host = createHost(runtime);
+    const session = await createStoredSession();
+
+    const first = await host.submitMessage({
+      sessionId: session.id,
+      parts: [{ type: 'text', text: 'Hello.' }],
+    });
+    // A fork point must be a clean cut: while the turn runs, the source is
+    // refused outright rather than quietly copying a shorter transcript.
+    await expect(
+      host.forkSession({ sessionId: session.id, fromMessageId: first.userMessageId }),
+    ).rejects.toMatchObject({ view: { code: 'SESSION_BUSY' } });
+
+    released.resolve();
+    await waitForAsync(
+      async () => (await store.listMessages(session.id))[1]?.status === 'success',
+      'the turn to settle',
+    );
+
+    const forked = await host.forkSession({
+      sessionId: session.id,
+      fromMessageId: first.assistantMessageId,
+    });
+    expect(forked.forkedFromSessionId).toBe(session.id);
+    const forkedMessages = await store.listMessages(forked.id);
+    expect(forkedMessages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(forked.forkBoundaryMessageId).toBe(forkedMessages.at(-1)?.id);
+    // The fork is idle and immediately usable, with no turn carried over.
+    const observation = await host.observeSession(forked.id, () => {});
+    expect(observation.snapshot.activeTurn).toBeNull();
+    expect(observation.snapshot.pendingApprovals).toEqual([]);
+
+    await expect(
+      host.forkSession({ sessionId: 'missing', fromMessageId: first.assistantMessageId }),
+    ).rejects.toMatchObject({ view: { code: 'SESSION_NOT_FOUND' } });
+    await expect(
+      host.forkSession({ sessionId: session.id, fromMessageId: 'missing' }),
+    ).rejects.toMatchObject({ view: { code: 'MESSAGE_NOT_FOUND' } });
   });
 
   test('fails closed on unknown sessions, agents, and unsupported input', async () => {

@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, isNotNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, lt, lte, notInArray, or, sql } from 'drizzle-orm';
 
 import {
   AppStatePolicy,
@@ -24,6 +24,8 @@ import {
 import type {
   AgentSessionStore,
   FinalizeAssistantMessageInput,
+  ForkSessionInput,
+  ForkSessionResult,
   ReserveInitialSubmissionInput,
   ReserveInitialSubmissionResult,
   ReserveSubmissionInput,
@@ -111,6 +113,12 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
 
   async deleteSession(sessionId: string): Promise<boolean> {
     return this.dbService.withWriteTx(async (tx) => {
+      // Advance each surviving fork's row timestamp through Drizzle before the
+      // FK's ON DELETE SET NULL fallback can clear the lineage invisibly.
+      await tx
+        .update(agentSessionTable)
+        .set({ forkBoundaryMessageId: null, forkedFromSessionId: null })
+        .where(eq(agentSessionTable.forkedFromSessionId, sessionId));
       // Messages go with the session via the ON DELETE CASCADE foreign key.
       const deleted = await tx
         .delete(agentSessionTable)
@@ -129,31 +137,160 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
         .values({
           agentId: input.agentId,
           executionTarget: input.executionTarget,
-          lastActivityAt: Date.now(),
         })
         .returning();
-      const reserved = await insertSubmission(tx, {
+      const { activityAt, ...reserved } = await insertSubmission(tx, {
         sessionId: sessionRow.id,
         userParts: input.userParts,
         modelId: input.modelId,
         inferenceSnapshot: input.inferenceSnapshot,
       });
-      return { ...reserved, session: toAgentSessionView(sessionRow) };
+      const [activeSessionRow] = await tx
+        .update(agentSessionTable)
+        .set({ lastActivityAt: activityAt })
+        .where(eq(agentSessionTable.id, sessionRow.id))
+        .returning();
+      return { ...reserved, session: toAgentSessionView(activeSessionRow) };
     });
   }
 
   async reserveSubmission(input: ReserveSubmissionInput): Promise<ReserveSubmissionResult> {
     return this.dbService.withWriteTx(async (tx) => {
-      const now = Date.now();
-      const touched = await tx
-        .update(agentSessionTable)
-        .set({ lastActivityAt: now })
+      const [session] = await tx
+        .select({ id: agentSessionTable.id })
+        .from(agentSessionTable)
         .where(eq(agentSessionTable.id, input.sessionId))
-        .returning({ id: agentSessionTable.id });
-      if (touched.length === 0) {
+        .limit(1);
+      if (!session) {
         throw new Error(`Cannot reserve a submission for an unknown session: ${input.sessionId}`);
       }
-      return insertSubmission(tx, input);
+      const { activityAt, ...reserved } = await insertSubmission(tx, input);
+      await tx
+        .update(agentSessionTable)
+        .set({ lastActivityAt: activityAt })
+        .where(eq(agentSessionTable.id, input.sessionId));
+      return reserved;
+    });
+  }
+
+  async forkSession(input: ForkSessionInput): Promise<ForkSessionResult> {
+    return this.dbService.withWriteTx(async (tx) => {
+      const [source] = await tx
+        .select()
+        .from(agentSessionTable)
+        .where(eq(agentSessionTable.id, input.sessionId))
+        .limit(1);
+      if (!source) {
+        return { status: 'session-not-found' };
+      }
+
+      const [anchor] = await tx
+        .select({
+          activityAt: agentSessionMessageTable.activityAt,
+          createdAt: agentSessionMessageTable.createdAt,
+          id: agentSessionMessageTable.id,
+          status: agentSessionMessageTable.status,
+        })
+        .from(agentSessionMessageTable)
+        .where(
+          and(
+            eq(agentSessionMessageTable.id, input.fromMessageId),
+            eq(agentSessionMessageTable.sessionId, input.sessionId),
+          ),
+        )
+        .limit(1);
+      if (!anchor) {
+        return { status: 'message-not-found' };
+      }
+      if ((UNSETTLED_MESSAGE_STATUSES as readonly string[]).includes(anchor.status)) {
+        return { status: 'fork-point-unsettled' };
+      }
+
+      const [forked] = await tx
+        .insert(agentSessionTable)
+        .values({
+          agentId: source.agentId,
+          executionTarget: source.executionTarget,
+          forkedFromSessionId: source.id,
+          // A fork copies history but creates no conversation activity of its
+          // own. Keep the last included message's original activity time.
+          lastActivityAt: anchor.activityAt,
+          // Falls back to the source's name. Auto-naming will not rewrite
+          // either form later, because neither is empty nor matches the
+          // first-user-message title the naming policy expects to overwrite.
+          title: input.title ?? source.title,
+          titleIsManual: source.titleIsManual,
+        })
+        .returning();
+
+      // Transcript order is `(createdAt, id)`, so the fork point is a keyset
+      // bound, not an offset.
+      const copied = await tx
+        .select()
+        .from(agentSessionMessageTable)
+        .where(
+          and(
+            eq(agentSessionMessageTable.sessionId, input.sessionId),
+            // An unsettled assistant row would arrive as a placeholder that
+            // nothing will ever settle: boot reconciliation only reaches rows
+            // that were unsettled when the process died.
+            notInArray(agentSessionMessageTable.status, [...UNSETTLED_MESSAGE_STATUSES]),
+            or(
+              lt(agentSessionMessageTable.createdAt, anchor.createdAt),
+              and(
+                eq(agentSessionMessageTable.createdAt, anchor.createdAt),
+                lte(agentSessionMessageTable.id, anchor.id),
+              ),
+            ),
+          ),
+        )
+        .orderBy(agentSessionMessageTable.createdAt, agentSessionMessageTable.id);
+
+      const forkedTurnIds = new Map<string, string>();
+      // Serial inserts, not one multi-row statement: the copy relies on the
+      // generated UUID v7 ids staying monotonic in transcript order, and a
+      // batched insert would also risk the bound-parameter ceiling on a long
+      // transcript.
+      let forkBoundaryMessageId: string | undefined;
+      for (const row of copied) {
+        const copiedMessageId = createOrderedUuid();
+        await tx.insert(agentSessionMessageTable).values({
+          // Deliberate exception to the "never write createdAt" rule in
+          // `_columnHelpers.ts`: the fork presents the same history, so its
+          // rows keep the moment they were originally written. Ordering still
+          // holds because createdAt is the major sort key and the reissued ids
+          // break ties in the same direction as the source.
+          createdAt: row.createdAt,
+          activityAt: row.activityAt,
+          data: row.data,
+          error: row.error,
+          id: copiedMessageId,
+          messageSnapshot: row.messageSnapshot,
+          modelId: row.modelId,
+          role: row.role,
+          sessionId: forked.id,
+          status: row.status,
+          // contextCheckpoint is deliberately dropped: it is a Runtime-private
+          // artifact anchored to a turn id that this copy no longer carries, so
+          // the fork's first execution replays full history instead.
+          turnId: reissueTurnId(forkedTurnIds, row.turnId),
+          usage: row.usage,
+        });
+        if (row.id === anchor.id) {
+          forkBoundaryMessageId = copiedMessageId;
+        }
+      }
+
+      if (!forkBoundaryMessageId) {
+        throw new Error('Fork transcript is missing its settled boundary message.');
+      }
+      const [forkedWithBoundary] = await tx
+        .update(agentSessionTable)
+        .set({ forkBoundaryMessageId })
+        .where(eq(agentSessionTable.id, forked.id))
+        .returning();
+
+      return { session: toAgentSessionView(forkedWithBoundary), status: 'forked' };
     });
   }
 
@@ -275,9 +412,11 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
 
   async finalizeAssistantMessage(input: FinalizeAssistantMessageInput): Promise<AgentMessageView> {
     return this.dbService.withWriteTx(async (tx) => {
+      const activityAt = Date.now();
       const [row] = await tx
         .update(agentSessionMessageTable)
         .set({
+          activityAt,
           status: input.status,
           data: { version: 1, parts: input.parts },
           usage: input.usage,
@@ -291,7 +430,7 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
       }
       await tx
         .update(agentSessionTable)
-        .set({ lastActivityAt: Date.now() })
+        .set({ lastActivityAt: activityAt })
         .where(eq(agentSessionTable.id, row.sessionId));
       return toAgentMessageView(row);
     });
@@ -328,14 +467,35 @@ export class SqliteAgentSessionStore extends BaseService implements AgentSession
   }
 }
 
+/**
+ * Reissues one source turn id per fork, keeping a submission's user/assistant
+ * pair correlated while leaving no id shared with the source Session.
+ */
+function reissueTurnId(reissued: Map<string, string>, turnId: string | null): string | null {
+  if (turnId === null) {
+    return null;
+  }
+
+  const existing = reissued.get(turnId);
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const next = createOrderedUuid();
+  reissued.set(turnId, next);
+  return next;
+}
+
 async function insertSubmission(
   tx: Database,
   input: ReserveSubmissionInput,
-): Promise<ReserveSubmissionResult> {
+): Promise<ReserveSubmissionResult & { activityAt: number }> {
+  const activityAt = Date.now();
   const turnId = createOrderedUuid();
   const [userRow] = await tx
     .insert(agentSessionMessageTable)
     .values({
+      activityAt,
       sessionId: input.sessionId,
       turnId,
       role: 'user',
@@ -346,6 +506,7 @@ async function insertSubmission(
   const [assistantRow] = await tx
     .insert(agentSessionMessageTable)
     .values({
+      activityAt,
       sessionId: input.sessionId,
       turnId,
       role: 'assistant',
@@ -356,6 +517,7 @@ async function insertSubmission(
     })
     .returning();
   return {
+    activityAt,
     turnId,
     userMessage: toAgentMessageView(userRow),
     assistantMessage: toAgentMessageView(assistantRow),
