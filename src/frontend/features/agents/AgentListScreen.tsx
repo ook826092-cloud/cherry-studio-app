@@ -6,6 +6,7 @@ import {
   ContextMenuScrollBoundary,
   type MenuItem,
   useAlert,
+  useToast,
 } from '@cherrystudio/ui/components';
 import { useRouter } from 'expo-router';
 import { useCallback, useMemo } from 'react';
@@ -13,9 +14,9 @@ import { useTranslation } from 'react-i18next';
 import { ScrollView, Text, View } from 'react-native';
 import { Pressable as GesturePressable } from 'react-native-gesture-handler';
 
-import { AgentAvatar } from '@/frontend/components/avatar';
-import { RouteHeader, type HeaderToolbarAction } from '@/frontend/components/headers';
-import { InlineSearch, useInlineSearch } from '@/frontend/components/inlineSearch';
+import { RouteHeader, type HeaderToolbarAction } from '@/frontend/appShell/header';
+import { AgentAvatar } from '@/frontend/components/Avatar';
+import { InlineSearch, useInlineSearch } from '@/frontend/components/InlineSearch';
 import { useAgentMutations, useAgentsApi } from '@/frontend/hooks/agent';
 import type { Agent } from '@/shared/data/types/agent';
 
@@ -27,6 +28,7 @@ export default function AgentListScreen() {
   const { agents, error, isLoading, refetch } = useAgentsApi();
   const { deleteAgent } = useAgentMutations();
   const { alert } = useAlert();
+  const { toast } = useToast();
   const {
     isFiltering,
     query,
@@ -70,12 +72,12 @@ export default function AgentListScreen() {
         title: t('agent.delete.title'),
         onConfirm: () => {
           void deleteAgent(agent.id).catch(() => {
-            alert.show({ title: t('agent.toast.deleteFailed') });
+            toast.show({ label: t('agent.toast.deleteFailed'), variant: 'danger' });
           });
         },
       });
     },
-    [alert, deleteAgent, t],
+    [alert, deleteAgent, t, toast],
   );
 
   return (
@@ -104,34 +106,41 @@ export default function AgentListScreen() {
                 ))}
               </View>
             ) : isFiltering ? (
-              <ContentState.Empty className="px-8 py-16" title={t('agent.list.noResults')} />
+              <View className="px-8 py-16">
+                <ContentState.Empty title={t('agent.list.noResults')} />
+              </View>
             ) : isLoading ? (
-              <ContentState.Loading className="px-8 py-16" title={t('agent.list.loading')} />
+              <View className="px-8 py-16">
+                <ContentState.Loading title={t('agent.list.loading')} />
+              </View>
             ) : error ? (
-              <ContentState.Error
-                className="px-8 py-16"
-                primaryAction={{
-                  children: t('agent.actions.retry'),
-                  onPress: () => void refetch(),
-                }}
-                title={t('agent.list.loadFailed')}
-              />
+              <View className="px-8 py-16">
+                <ContentState.Error
+                  primaryAction={{
+                    children: t('agent.actions.retry'),
+                    onPress: () => void refetch(),
+                  }}
+                  title={t('agent.list.loadFailed')}
+                />
+              </View>
             ) : (
-              <ContentState.Empty
-                description={t('agent.list.emptyDescription')}
-                icon={
-                  <ContentState.Icon>
-                    <BotIcon className="size-7 text-foreground" />
-                  </ContentState.Icon>
-                }
-                layout="page"
-                primaryAction={{
-                  accessibilityLabel: t('agent.actions.create'),
-                  children: t('agent.actions.create'),
-                  onPress: openCreateAgent,
-                }}
-                title={t('agent.list.emptyTitle')}
-              />
+              <View className="px-8 py-16">
+                <ContentState.Empty
+                  description={t('agent.list.emptyDescription')}
+                  icon={
+                    <ContentState.Icon>
+                      <BotIcon className="size-7 text-foreground" />
+                    </ContentState.Icon>
+                  }
+                  primaryAction={{
+                    accessibilityLabel: t('agent.actions.create'),
+                    children: t('agent.actions.create'),
+                    onPress: openCreateAgent,
+                  }}
+                  prominence="prominent"
+                  title={t('agent.list.emptyTitle')}
+                />
+              </View>
             )}
           </ScrollView>
         )}

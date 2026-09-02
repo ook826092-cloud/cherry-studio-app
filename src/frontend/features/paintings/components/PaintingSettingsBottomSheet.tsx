@@ -2,10 +2,7 @@ import ChevronRightIcon from '@cherrystudio/app-icons/icons/chevron-right';
 import type { CanonicalParamKey } from '@cherrystudio/provider-registry';
 import {
   BottomSheet,
-  Description,
-  FieldError,
   Input,
-  Label,
   Section,
   Slider,
   Switch,
@@ -17,13 +14,14 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { imageParamLabel, imageParamOptionLabel } from '../utils/imageGenerationLabels';
 import type {
   ImageParamDraft,
   ImageParamField,
   ResolvedImageGenerationMode,
-} from '../utils/imageGenerationParams';
-import { getImageParamFields } from '../utils/imageGenerationParams';
+} from '@/frontend/data/paintings/imageGenerationParams';
+import { getImageParamFields } from '@/frontend/data/paintings/imageGenerationParams';
+
+import { imageParamLabel, imageParamOptionLabel } from '../utils/imageGenerationLabels';
 
 const FIELD_GAP = 8;
 // 固定 5 列等宽网格，超出自动换行；cell 恒定方形保证选中态切换时兄弟选项不挪位。
@@ -216,7 +214,7 @@ function PaintingSettingField({
     case 'text':
       return (
         <TextField>
-          <Label>{label}</Label>
+          <TextField.Label>{label}</TextField.Label>
           <Input
             accessibilityLabel={label}
             autoCapitalize="none"
@@ -274,7 +272,7 @@ function AspectRatioField({
         />
       </View>
       <Section>
-        <Section.Item className="p-4">
+        <Section.Item density="comfortable">
           <View className="flex-row flex-wrap" style={styles.chipGrid}>
             {options.map((option) => (
               <AspectRatioOption
@@ -526,8 +524,8 @@ function CustomSizeField({
     min: field.spec.minSide,
   });
   return (
-    <TextField isInvalid={isInvalid}>
-      <Label>{imageParamLabel(t, field.key)}</Label>
+    <TextField invalid={isInvalid}>
+      <TextField.Label>{imageParamLabel(t, field.key)}</TextField.Label>
       <View className="flex-row items-center gap-2">
         <Input
           accessibilityLabel={t('painting.settings.width')}
@@ -547,8 +545,8 @@ function CustomSizeField({
           value={height === undefined || height === null ? '' : String(height)}
         />
       </View>
-      <Description hideOnInvalid>{rangeDescription}</Description>
-      <FieldError>{rangeDescription}</FieldError>
+      <TextField.Description>{rangeDescription}</TextField.Description>
+      <TextField.Error>{rangeDescription}</TextField.Error>
     </TextField>
   );
 }

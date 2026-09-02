@@ -8,13 +8,13 @@ import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ComposerDock, ComposerSessionProvider } from '@/frontend/components/composer';
-import { MainHeader } from '@/frontend/components/headers';
+import { MainHeader } from '@/frontend/appShell/header';
 import {
   type ChatRouteParamsInput,
   type ChatTarget,
   parseChatRoute,
-} from '@/frontend/components/navigation/chat';
+} from '@/frontend/appShell/navigation/chat';
+import { ComposerDock, ComposerSessionProvider } from '@/frontend/components/Composer';
 import {
   useAgentApiById,
   useAgentMessageHistoryWindow,
@@ -22,9 +22,9 @@ import {
 } from '@/frontend/hooks/agent';
 import { DataApiError, ErrorCode } from '@/shared/data/api/errors';
 
-import { ChatInput } from './input';
-import { ChatRouteResolver } from './navigation';
-import { ChatDraftState, ChatEmptyState, ChatWorkspace } from './workspace';
+import { ChatInput } from './components/ChatInput';
+import { ChatRouteResolver } from './components/ChatRouteResolver';
+import { ChatDraftState, ChatEmptyState, ChatWorkspace } from './components/ChatWorkspace';
 
 const PREVIEW_CONTENT_BOTTOM_INSET = 12;
 
@@ -70,15 +70,16 @@ function ResolvedChatScreen({ target }: { target: ChatTarget }) {
       <MainHeader />
       <View className="flex-1">
         {sessionId && session.error ? (
-          <ContentState.Error
-            className="flex-1"
-            layout="page"
-            primaryAction={{
-              children: t('agent.actions.retry'),
-              onPress: () => void session.refetch(),
-            }}
-            title={t('navigation.chatsLoadFailed')}
-          />
+          <View className="flex-1 justify-center px-8 py-16">
+            <ContentState.Error
+              primaryAction={{
+                children: t('agent.actions.retry'),
+                onPress: () => void session.refetch(),
+              }}
+              prominence="prominent"
+              title={t('navigation.chatsLoadFailed')}
+            />
+          </View>
         ) : isSessionAvailable && sessionId ? (
           <ChatWorkspace
             assistantAvatarUri={agent.agent?.avatarUri}
