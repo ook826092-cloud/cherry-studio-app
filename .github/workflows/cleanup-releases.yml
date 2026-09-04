@@ -1,8 +1,6 @@
 name: 清理过期构建 Release
 
 on:
-  schedule:
-    - cron: '30 3 * * 0'
   workflow_dispatch:
 
 permissions:
