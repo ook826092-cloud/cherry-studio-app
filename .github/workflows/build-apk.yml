@@ -1,8 +1,6 @@
 name: 编译 APK (ARM64-v8a Release)
 
 on:
-  schedule:
-    - cron: '10 16,4 * * *'
   workflow_dispatch:
 
 concurrency:
