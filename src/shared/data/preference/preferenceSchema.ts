@@ -48,6 +48,7 @@ export interface PreferenceSchema {
   'agent.session_naming.prompt': string;
 
   'ui.font_size_step': FontSizeStep;
+  'ui.library.view_mode': 'grid' | 'list';
   'ui.theme_mode': ThemeMode;
 }
 
@@ -60,7 +61,7 @@ export const PreferenceDefaults = {
   'chat.background_reply.enabled': true,
   'agent.default_model_id': null,
   'chat.web_search.compression.cutoff_limit': 2000,
-  'chat.web_search.compression.method': 'none',
+  'chat.web_search.compression.method': 'cutoff',
   'chat.web_search.default_fetch_urls_provider': 'jina',
   'chat.web_search.default_search_keywords_provider': 'exa-mcp',
   'chat.web_search.max_results': 5,
@@ -75,6 +76,7 @@ export const PreferenceDefaults = {
   'agent.session_naming.prompt': '',
 
   'ui.font_size_step': 0,
+  'ui.library.view_mode': 'grid',
   'ui.theme_mode': ThemeMode.system,
 } satisfies PreferenceSchema;
 

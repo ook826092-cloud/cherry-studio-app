@@ -9,6 +9,8 @@ import * as z from 'zod';
 import { MessageStatsSchema } from '@/shared/data/types/message';
 import { UniqueModelIdSchema } from '@/shared/data/types/model';
 
+import { FileAttachmentIssueSchema, FileAttachmentReportSchema } from '../fileAttachment';
+
 export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
     z.null(),
@@ -202,6 +204,7 @@ export const AgentErrorViewSchema = z
       'CAPABILITY_UNSUPPORTED',
       'TOOL_CALLING_UNSUPPORTED',
       'ATTACHMENT_INVALID',
+      'ATTACHMENT_NO_TEXT',
       'ATTACHMENT_UNAVAILABLE',
       'ATTACHMENT_METADATA_MISMATCH',
       'APPROVAL_NOT_FOUND',
@@ -219,6 +222,7 @@ export const AgentErrorViewSchema = z
     retryable: z.boolean(),
     /** Present on newly persisted execution failures; optional for historical rows. */
     failure: AgentFailureSnapshotSchema.optional(),
+    attachmentIssue: FileAttachmentIssueSchema.optional(),
   })
   .superRefine((error, context) => {
     if (error.failure !== undefined && error.code !== 'EXECUTION_FAILED') {
@@ -342,6 +346,7 @@ export const AgentMessagePartSchema = z.union([
     mediaType: z.string(),
     name: z.string().optional(),
     purpose: z.enum(['input-attachment', 'artifact']),
+    attachmentReport: FileAttachmentReportSchema.optional(),
   }),
   AgentToolMessagePartSchema,
   z.strictObject({
