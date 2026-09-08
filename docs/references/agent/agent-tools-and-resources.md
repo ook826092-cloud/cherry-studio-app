@@ -255,7 +255,7 @@ read it through a controlled tool; otherwise the reference remains visible as un
 under `artifacts`. `edit_file` additionally returns the source id, replacement count, and a
 bounded snippet of the edited region; when it saves a new version it marks that entry as `derived`,
 and when it rewrites this turn's draft it returns no artifact because the draft's file part already
-exists. `read_file` returns a line window under `value` and never an artifact. `generate_image` returns `{ id, name }` refs under `value` and
+exists. `read_file` returns a text-line or AnyDoc JSON-character window under `value` and never an artifact. `generate_image` returns `{ id, name }` refs under `value` and
 each imported image under `artifacts`; each image is named after its prompt (`readableFilename`),
 never after an id. Pi projects those artifacts as `purpose: 'artifact'` file parts, and the Host
 persists both the result envelope and the file parts. Device and web capabilities return portable
@@ -269,6 +269,23 @@ OS-sanctioned continuation mechanisms described in
 [Job Runtime](../job-runtime.md#current-boundaries).
 
 ## Capability Rules
+
+### Web Search And Fetch
+
+The Host's web guidance targets one search round and, when source text is needed, one page-read
+round for ordinary lookups. Independent queries and page reads should run together. Further
+research must address a material evidence gap or an explicit request for broader research; the
+model should otherwise answer from the available sources and state limitations. Citation ids resolve
+within the message that collected them. Sourced follow-ups read relevant known URLs again to obtain
+ids for the current turn; they do not reuse earlier turns' citation ids. This is model guidance, not
+a separate hard execution limit.
+
+The turn-local web tools reuse identical pending and completed requests, including citation ids.
+Search keys normalize whitespace; page reads cache each URL independently, including across
+overlapping batches, and reset with the next turn's catalog. A partially successful batch keeps its
+successful pages alongside all failed inputs and stops both web tools for the turn. Combining cached
+pages still applies the shared page and batch content limits. Failed requests are cached without
+retry; cancellation still propagates without becoming a cached failure.
 
 ### Streamable HTTP MCP
 
@@ -359,20 +376,35 @@ the model listed them. Without it two edits of one draft would both read the pre
 second write would drop the first — harmless while every edit created its own entry, silent data
 loss once a draft is rewritten in place. Edits of different files stay concurrent.
 
-`read_file` takes `file_entry_id` plus optional one-based `start_line` and `limit` (default 500
+`read_file` is ledger-scoped: only attachments, earlier artifacts of the Session, and this turn's
+drafts can be read. It shares `readAttachmentContent` with attachment preparation and captures the
+same per-turn `file.document_parser.mode`; changing the preference affects the next turn, not a
+later tool call in this turn. No parser failure silently switches engines.
+
+For ordinary text, built-in Office text, and native PDF text, `read_file` takes `file_entry_id`
+plus optional one-based `start_line` and `limit` (default 500
 lines, at most 2,000) and returns
 `{ status, fileEntryId, filename, size, startLine, lineCount, totalLines, truncated, text }`. The
 window is cut on a line boundary at 100,000 characters, so `startLine + lineCount` is always the
 next line to request. A single line larger than the whole budget is the one case that cannot be cut
 on a boundary: the head is returned with `lineTruncated: true` and the read reports itself
 truncated, because the rest of that line is unreachable by asking for a later line and silence would
-present a fraction of a minified file as the whole of it. It reads only ledger members — attachments, earlier artifacts of the Session, and
-this turn's drafts. Text sources use the same strict UTF-8 decoding and 1 MiB source limit as
-`edit_file`. PDF, DOCX, PPTX, and XLSX sources instead use the local document extractor and 20 MiB
+present a fraction of a minified file as the whole of it. Text sources use the same strict UTF-8 decoding and 1 MiB source limit as
+`edit_file`. Documents use the selected local parser and 20 MiB
 source ceiling described in [File Model](../data/file-model.md). `sourceTruncated: true` means the
 document extractor reached its own page/row/text limit; it is independent of the pageable window's
 `truncated` flag. This lets a model continue reading an attached document or revisit a file it wrote
 in an earlier turn, whose content is deliberately not replayed as an attachment.
+
+For AnyDoc output, use zero-based `offset` and `max_characters` (default/maximum 100,000 Unicode
+code points), never line parameters. The result is explicitly `format: 'json-fragment'`, with
+`text`, `offset`, `characterCount`, `totalCharacters`, `nextOffset`, and `complete`. Concatenating
+successive `text` windows until `nextOffset` is null recovers the complete original IR JSON, even
+through a single very long string or non-BMP characters. Fragments are not complete JSON objects.
+Parser/version, original warnings, and asset descriptors accompany each window. Assets are
+`reference-only`: no pixel bytes, image artifacts, or multimodal tool-result extension is added.
+Mixed line/JSON parameters fail explicitly. The original community `fallback` result remains an
+error result rather than being replaced by built-in text.
 
 Both tools run without approval because they have no destructive form, and the Host offers them only
 to models that support function calling. Handing tools to a model that cannot call them fails the
@@ -397,7 +429,9 @@ credentials and private payloads from errors, and returns portable values. Cance
 through MCP, provider, device, and file operations where their APIs support it; non-abortable native
 work must discard late results after the turn is terminal.
 
-Pi caps each turn at eight tool-loop steps, sixteen requested tool calls, and ten minutes. The MCP
+Pi caps each turn at twenty tool-loop steps and sixty-four tool calls. Reaching either budget allows
+one final response with all tools disabled, using the current results and disclosing remaining gaps.
+This response remains subject to the context limit and the same ten-minute turn deadline. The MCP
 adapter separately caps each remote call at 60 seconds and projects at most 256 KiB of JSON. These
 limits are application constants rather than user settings in Version 1.
 

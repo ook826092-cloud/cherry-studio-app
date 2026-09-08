@@ -18,12 +18,14 @@
 import { MODEL_CAPABILITY } from '@cherrystudio/provider-registry';
 import { Platform } from 'react-native';
 
+import type { AiUsageAttributionResolver } from '@/backend/ai/AiService';
 import type { ModelService } from '@/backend/data/services/ModelService';
 import { providerRegistryService } from '@/backend/data/services/ProviderRegistryService';
 import { fileContent } from '@/backend/services/file/fileContent';
 import { paintingFileStorage } from '@/backend/services/paintings/paintingFileStorage';
 import { devicePermissions } from '@/backend/services/permissions';
 import type { DevicePermissionScope, SystemPermissionState } from '@/shared/contracts';
+import type { DocumentParserMode } from '@/shared/contracts/fileAttachment';
 import { loggerService } from '@/shared/core/logger/LoggerService';
 import type { AgentCapability } from '@/shared/data/types/agentCapability';
 import {
@@ -89,9 +91,12 @@ export type { TurnFileScope, TurnToolResources } from '../resources/managedFileR
 export type SystemCapabilitySource = {
   /** The tools this turn may use; empty when the model cannot call any. */
   getTools(input: {
+    documentParserMode: DocumentParserMode;
     disabledCapabilities: readonly AgentCapability[];
     model: RuntimeModel;
     resources: TurnToolResources;
+    /** Attribution for provider calls a tool makes; read when the tool runs. */
+    resolveUsageAttribution?: AiUsageAttributionResolver;
   }): Promise<readonly RuntimeTool[]>;
 };
 
@@ -121,7 +126,13 @@ export function createSystemCapabilitySource(
   overrides: Partial<SystemCapabilitySourceDependencies> = {},
 ): SystemCapabilitySource {
   return {
-    async getTools({ disabledCapabilities, model, resources }) {
+    async getTools({
+      disabledCapabilities,
+      model,
+      resources,
+      documentParserMode,
+      resolveUsageAttribution,
+    }) {
       const deps = resolveDependencies(services, overrides);
       if (!(await deps.supportsToolCalling(model))) {
         // Handing tools to a model that cannot call them fails the whole turn.
@@ -129,7 +140,13 @@ export function createSystemCapabilitySource(
       }
 
       const scope = await resolveScope(deps, new Set(disabledCapabilities));
-      const catalog = createCatalog(deps, scope, resources);
+      const catalog = createCatalog(
+        deps,
+        scope,
+        resources,
+        documentParserMode,
+        resolveUsageAttribution,
+      );
       return BUILT_IN_TOOL_DESCRIPTORS.flatMap((descriptor) => {
         const policy = resolveApproval(descriptor, scope);
         const tool = catalog.get(descriptor.capabilityId);
@@ -200,6 +217,8 @@ function createCatalog(
   deps: SystemCapabilitySourceDependencies,
   scope: BuiltInToolScope,
   resources: TurnToolResources,
+  documentParserMode: DocumentParserMode,
+  resolveUsageAttribution?: AiUsageAttributionResolver,
 ): ReadonlyMap<string, RuntimeTool> {
   const deviceDeps: DeviceToolDependencies = { devicePermissions: deps.devicePermissions };
   const tools = [
@@ -212,14 +231,14 @@ function createCatalog(
       },
       resources,
     ),
-    createReadFileTool(managedFileResolver, resources),
+    createReadFileTool(managedFileResolver, resources, documentParserMode),
     createWriteFileTool(fileContent),
     ...createCalendarTools(deviceDeps),
     ...createReminderTools(deviceDeps),
     ...createHealthTools(deviceDeps),
     ...createLocationTools(deviceDeps),
     ...createWebTools({ webSearch: deps.webSearch }),
-    createGenerateImageTool(deps.painting, scope.paintingModel, resources),
+    createGenerateImageTool(deps.painting, scope.paintingModel, resources, resolveUsageAttribution),
   ];
   return new Map(
     tools.flatMap((tool) =>

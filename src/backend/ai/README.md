@@ -22,6 +22,8 @@ boundaries around it.
   (`@/shared/contracts/agent`) and the Runtime contract, plus Agent definition and protocol
   projection policy. The concrete Runtime enters through the composition root's `AgentRuntime`
   registration; the Host never constructs one.
+  It also retains a small status snapshot for each Session that runs in the current generation,
+  with status-only subscriptions for lists; transcript observation remains route-scoped.
 - `agent/modelCheck/` runs a bounded, cancellable chat connection probe through that same bound
   Runtime, without a persisted Session, history, or tools. Bootstrap injects it into the models
   workflow and records usage; only a closed failure category reaches the setup UI.
@@ -35,6 +37,10 @@ boundaries around it.
   lives in `generation/`, and the Pi language compatibility decision lives in `agent/runtime/pi/`.
 - `mcp/` owns the mobile Streamable HTTP transport, connection lifecycle, server status, and tool
   discovery used by MCP settings.
+- `observability/` owns local diagnostic traces: explicit span handles, bounded metadata capture,
+  retained JSONL files, and stable snapshots for future diagnostic packages. `TraceStorageService`
+  is lifecycle-owned and flushes on backgrounding and stop; the public instrumentation surface is
+  platform-independent. See [its contract](observability/README.md).
 
 Pure provider implementations, request types, and parameter policies must not be duplicated here.
 
