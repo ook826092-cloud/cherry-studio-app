@@ -68,6 +68,8 @@ import { tracePiStream } from './tracePiStream';
 
 export type PiModelResolution = {
   defaultThinkingLevel: ModelThinkingLevel;
+  /** Independent provider input cap, before reserving this request's output. */
+  maxInputTokens?: number;
   model: PiModel<PiApi>;
   redactionValues: readonly string[];
   streamFn: AgentOptions['streamFn'];
@@ -858,6 +860,24 @@ class PiRuntimeSession implements AgentRuntimeSession {
       const streamFn = tracePiStream(providerStream, request.trace);
       const models: Pick<Models, 'completeSimple'> = {
         completeSimple: async (model, context, options) => {
+          if (
+            estimatePiLoopContextHeadroomTokens({
+              contextWindow: model.contextWindow,
+              maxInputTokens: resolution.maxInputTokens,
+              messages: context.messages,
+              outputReserveTokens: options?.maxTokens ?? model.maxTokens,
+              systemPrompt: context.systemPrompt ?? '',
+              tools: context.tools ?? [],
+            }) < 0
+          ) {
+            throw Object.assign(
+              new Error('The compaction request exceeds the model input budget.'),
+              {
+                code: 'context_window_exceeded',
+                retryable: false,
+              },
+            );
+          }
           const response = this.contextOptions.completeSimple
             ? await this.contextOptions.completeSimple(model, context, options)
             : await (await streamFn(model, context, options)).result();
@@ -871,6 +891,7 @@ class PiRuntimeSession implements AgentRuntimeSession {
         planPiContext({
           checkpoint: request.contextCheckpoint,
           conversation,
+          maxInputTokens: resolution.maxInputTokens,
           model: resolution.model,
           models,
           options: this.contextOptions,
@@ -906,6 +927,7 @@ class PiRuntimeSession implements AgentRuntimeSession {
       const updateModelContextHeadroom = (messages: PiAgentMessage[]) => {
         turn.modelContextHeadroomTokens = estimatePiLoopContextHeadroomTokens({
           contextWindow: resolution.model.contextWindow,
+          maxInputTokens: resolution.maxInputTokens,
           messages,
           outputReserveTokens,
           systemPrompt: modelContext.systemPrompt,
@@ -1235,11 +1257,18 @@ class PiRuntimeSession implements AgentRuntimeSession {
         this.consumeModelToolResultBudget(turn, toolCallId, activity.providerName, output);
         return output;
       }
-      const { activityOutput, modelOutput } = operation(modelOutputCharacterLimit);
+      const { activityError, activityOutput, modelOutput } = operation(modelOutputCharacterLimit);
       if (turn.phase !== 'running' || signal?.aborted) {
         return this.interruptToolCall(turn, part);
       }
-      this.replaceToolPart(turn, part, { state: 'output-available', output: activityOutput });
+      this.replaceToolPart(
+        turn,
+        part,
+        activityError
+          ? { state: 'error', error: activityError, output: activityOutput }
+          : { state: 'output-available', output: activityOutput },
+      );
+      if (activityError) turn.failedToolCalls.add(toolCallId);
       turn.settledToolCalls.add(toolCallId);
       this.consumeModelToolResultBudget(turn, toolCallId, activity.providerName, modelOutput);
       return modelOutput;

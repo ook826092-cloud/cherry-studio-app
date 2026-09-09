@@ -11,6 +11,7 @@ const mockAi = { kind: 'ai' };
 const mockTraces = { kind: 'traces' };
 const mockCache = { kind: 'cache' };
 const mockDb = { kind: 'db' };
+const mockDesktopConnections = { kind: 'desktop-connections' };
 const mockJobRuntime = { kind: 'job-runtime' };
 const mockMcpRuntime = { kind: 'mcp-runtime' };
 const mockPreference = { kind: 'preference' };
@@ -48,6 +49,14 @@ jest.mock('@/bootstrap/composition/createBackend', () => ({
   createBackend: (services: unknown, dependencies: unknown) =>
     mockCreateBackend(services, dependencies),
 }));
+// The real registry imports device tools, but this suite only exercises runtime wiring.
+jest.mock('@/backend/services/permissions', () => ({
+  devicePermissions: {
+    getStatuses: jest.fn(),
+    openSystemSettings: jest.fn(),
+    request: jest.fn(),
+  },
+}));
 // The real layouts touch the ExpoWidgets native module at import time.
 jest.mock('@/frontend/appShell/backgroundActivity/AssistantActivity/AssistantActivity', () => ({
   __esModule: true,
@@ -75,6 +84,7 @@ const createRuntime = () =>
     BackgroundActivityEnvironment: mockBackgroundActivityEnvironment,
     CacheService: mockCache,
     DbService: mockDb,
+    DesktopConnectionRuntime: mockDesktopConnections,
     JobRuntime: mockJobRuntime,
     McpRuntimeService: mockMcpRuntime,
     MobileAgentHost: mockAgent,
@@ -116,6 +126,7 @@ describe('createAppBootstrapRuntime', () => {
     });
     expect(mockCreateBackend).toHaveBeenCalledWith(mockServices, {
       dbService: mockDb,
+      desktopConnections: mockDesktopConnections,
       languageServing: mockAgentRuntime,
       providerRegistryUpdater: mockProviderRegistryUpdater,
     });
