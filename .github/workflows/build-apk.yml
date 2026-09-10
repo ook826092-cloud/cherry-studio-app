@@ -105,20 +105,8 @@ jobs:
         run: python3 scripts/write_proguard.py
 
       - if: steps.check.outputs.skip != 'true'
-        name: 修复 sentry-cli 二进制（根治：重新下载完整二进制）
-        run: |
-          # @sentry/cli 的平台二进制包（@sentry/cli-linux-x64）下载不完整，
-          # 导致 sentry-cli 无法启动。直接从 GitHub Releases 下载完整二进制覆盖。
-          VERSION=$(node -p "require('./node_modules/@sentry/cli/package.json').version" 2>/dev/null || echo "2.58.4")
-          echo "sentry-cli 版本: $VERSION"
-          mkdir -p node_modules/@sentry/cli/bin
-          curl -fsSL --retry 5 --connect-timeout 30 \
-            "https://github.com/getsentry/sentry-cli/releases/download/${VERSION}/sentry-cli-linux-x64" \
-            -o node_modules/@sentry/cli/bin/sentry-cli
-          chmod +x node_modules/@sentry/cli/bin/sentry-cli
-          echo "sentry-cli 二进制已修复："
-          ls -la node_modules/@sentry/cli/bin/sentry-cli
-          node_modules/@sentry/cli/bin/sentry-cli --version
+        name: 跳过 Sentry sourcemap 上传（编译自用，无需上传）
+        run: echo "SENTRY_DISABLE_AUTO_UPLOAD=true" >> "$GITHUB_ENV"
 
       - if: steps.check.outputs.skip != 'true'
         name: 编译 ARM64-v8a Release APK
